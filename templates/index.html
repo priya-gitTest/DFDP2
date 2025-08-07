@@ -1,1 +1,95 @@
+ <!DOCTYPE html>
+    <html lang="en">
+    <head>
+        <meta charset="UTF-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
+        <title>{{ title }}</title>
+        <script src="https://cdn.tailwindcss.com"></script>
+        <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+        <style>
+            body { font-family: 'Inter', sans-serif; }
+            .header { background-color: #1a2b47; }
+            .btn { @apply px-4 py-2 rounded-md font-semibold text-white transition-colors; }
+            .btn-primary { @apply bg-blue-600 hover:bg-blue-700; }
+            .btn-secondary { @apply bg-gray-600 hover:bg-gray-700; }
+        </style>
+    </head>
+    <body class="bg-gray-100 text-gray-800">
+        <header class="header text-white p-4 shadow-md">
+            <div class="container mx-auto flex justify-between items-center">
+                <h1 class="text-2xl font-bold">DICOM to RDF Demo</h1>
+                <nav>
+                    <a href="/" class="btn btn-secondary">Home</a>
+                    <a href="/catalog" class="btn btn-secondary">Metadata Catalog</a>
+                    <a href="/visualize" class="btn btn-secondary">Visualize Graph</a>
+                </nav>
+            </div>
+        </header>
 
+        <main class="container mx-auto p-8">
+            <div class="bg-white p-6 rounded-lg shadow-lg mb-8">
+                <h2 class="text-xl font-semibold mb-4 border-b pb-2">Welcome</h2>
+                <p>This application demonstrates a pipeline for processing DICOM files:</p>
+                <ul class="list-disc list-inside mt-2 space-y-1">
+                    <li>Extracts metadata from 50 mock DICOM files on startup.</li>
+                    <li>Maps metadata to <strong>ROO</strong> and <strong>SNOMED CT</strong> ontologies.</li>
+                    <li>Generates <strong>RDF triples</strong> and stores them in an in-memory graph.</li>
+                    <li>Provides a <strong>SPARQL endpoint</strong> for querying the data.</li>
+                    <li>Includes a <strong>Health DCAT-AP</strong> styled metadata catalog.</li>
+                    <li>Visualizes the resulting <strong>Knowledge Graph</strong>.</li>
+                </ul>
+            </div>
+
+            <div class="bg-white p-6 rounded-lg shadow-lg">
+                <h2 class="text-xl font-semibold mb-4 border-b pb-2">Upload New DICOM File</h2>
+                <p class="text-sm text-gray-600 mb-4">Extend the knowledge graph by uploading another DICOM file.</p>
+                <form action="/upload-dicom/" method="post" enctype="multipart/form-data">
+                    <input type="file" name="file" required class="block w-full text-sm text-gray-500 file:mr-4 file:py-2 file:px-4 file:rounded-full file:border-0 file:text-sm file:font-semibold file:bg-blue-50 file:text-blue-700 hover:file:bg-blue-100">
+                    <button type="submit" class="btn btn-primary mt-4">Upload and Process</button>
+                </form>
+                {% if upload_message %}
+                <div class="mt-4 p-3 bg-green-100 text-green-800 rounded-md">
+                    {{ upload_message }}
+                </div>
+                {% endif %}
+            </div>
+             <div class="bg-white p-6 rounded-lg shadow-lg mt-8">
+                <h2 class="text-xl font-semibold mb-4 border-b pb-2">SPARQL Query Interface</h2>
+                <form id="sparql-form">
+                    <textarea id="sparql-query" class="w-full h-48 p-2 border rounded-md font-mono text-sm" placeholder="Enter your SPARQL query here...">SELECT ?s ?p ?o WHERE { ?s ?p ?o } LIMIT 10</textarea>
+                    <button type="submit" class="btn btn-primary mt-4">Execute Query</button>
+                </form>
+                <div id="sparql-results-container" class="mt-4 hidden">
+                    <h3 class="font-semibold">Results:</h3>
+                    <pre id="sparql-results" class="bg-gray-800 text-white p-4 rounded-md overflow-x-auto text-sm"></pre>
+                </div>
+            </div>
+        </main>
+        <script>
+            document.getElementById('sparql-form').addEventListener('submit', async function(e) {
+                e.preventDefault();
+                const query = document.getElementById('sparql-query').value;
+                const resultsContainer = document.getElementById('sparql-results-container');
+                const resultsPre = document.getElementById('sparql-results');
+                
+                try {
+                    const response = await fetch('/sparql', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+                        body: new URLSearchParams({ query: query })
+                    });
+                    if (!response.ok) {
+                        const error = await response.json();
+                        throw new Error(error.detail || 'Query failed');
+                    }
+                    const data = await response.json();
+                    resultsPre.textContent = JSON.stringify(data, null, 2);
+                    resultsContainer.classList.remove('hidden');
+                } catch (error) {
+                    resultsPre.textContent = 'Error: ' + error.message;
+                    resultsContainer.classList.remove('hidden');
+                }
+            });
+        </script>
+    </body>
+    </html>
