@@ -325,3 +325,10 @@ async def upload_dicom_file(request: Request, file: UploadFile = File(...)):
         "title": "DICOM RDF Demo",
         "upload_message": message
     })
+if __name__ == "__main__":
+    import uvicorn
+    # This part is for running directly with `python main.py`
+    # Note: Uvicorn's auto-reload works best when called from the command line.
+    print("Starting server. Run with 'uvicorn main:app --reload' for auto-reloading.")
+    uvicorn.run(app, host="127.0.0.1", port=8000)
+
