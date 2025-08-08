@@ -53,6 +53,14 @@ python fetch_dicom.py
 # then start the FAST API App.
 uvicorn main:app --reload
 ```
+In case you get an error like this : ERROR:    [Errno 98] Address already in use
+Fix it using these commands : 
+```bash
+lsof -i :8000 #uvicorn 18407 codespace    3u  IPv4 257296      0t0  TCP localhost:8000 (LISTEN)
+kill -9 XXXX # displayed nos next to uvicorn, so 18407
+```
+Output : [1]+  Killed                  uvicorn main:app --reload
+
 3. Visit: [http://127.0.0.1:8000](http://127.0.0.1:8000)
 
 You’ll see logs like:
