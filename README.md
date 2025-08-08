@@ -128,10 +128,10 @@ ORDER BY ?studyDate
 
 | Prefix    | URI                                             |
 |-----------|--------------------------------------------------|
-| `ROO`     | http://www.cancerdata.org/roo/                  |
-| `SNOMED`  | http://snomed.info/sct/                         |
+| `ROO`     | https://www.cancerdata.org/roo-information       |
+| `SNOMED`  | https://bioportal.bioontology.org/ontologies/SNOMEDCT|
 | `DCAT`    | http://www.w3.org/ns/dcat#                      |
-| `HDCAT`   | http://health.data.gov.eu/def/dcat-ap/         |
+| `HDCAT`   | https://healthdcat-ap.github.io/        |
 | `SCHEMA`  | http://schema.org/                              |
 | `FOAF`    | http://xmlns.com/foaf/0.1/                      |
 | `DCTERMS` | http://purl.org/dc/terms/                       |
