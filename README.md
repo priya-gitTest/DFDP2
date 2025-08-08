@@ -47,10 +47,10 @@ pip install fastapi uvicorn "pydantic[email]" pydicom rdflib requests python-mul
 
 ## ▶️ Running the Application
 
-1. Save the application code as `main.py`
-2. In the same directory, run:
-
 ```bash
+#Load the Dicom iamges from Hugging Face Repository and convert them to DICOM files:
+python fetch_dicom.py 
+# then start the FAST API App.
 uvicorn main:app --reload
 ```
 3. Visit: [http://127.0.0.1:8000](http://127.0.0.1:8000)
@@ -129,8 +129,8 @@ ORDER BY ?studyDate
 ├── main.py             # FastAPI application
 ├── templates/          # HTML templates (auto-generated)
 ├── static/             # Static assets (CSS/JS)
-├── dicom_files/        # Uploaded DICOMs via Script
-
+├── dicom_files/        # DICOMs downloaded via Script
+├── dicom_uploads/      # Uploaded DICOMs via Web Interface
 ```
 ---
 
