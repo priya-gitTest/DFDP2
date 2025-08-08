@@ -1,11 +1,5 @@
 
 # main.py
-# A self-contained FastAPI application for DICOM metadata processing, RDF generation,
-# and knowledge graph visualization.
-# To run:
-# 1. Install necessary libraries: pip install fastapi uvicorn "pydantic[email]" pydicom rdflib requests python-multipart jinja2
-# 2. Save this file as main.py
-# 3. Run the server: uvicorn main:app --reload
 
 import os
 import uuid
