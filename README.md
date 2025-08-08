@@ -38,6 +38,13 @@ Built with **Python**, the app uses:
 - Python 3.7+
 - pip (Python package manager)
 
+  ### 🐙 **GitHub Codespaces** *(Recommended)*
+
+[![Open in GitHub Codespaces](https://github.com/codespaces/badge.svg)](https://codespaces.new/priya-gitTest/DFDP2)
+
+```bash
+# 1. Open in Codespaces (click badge above)
+
 ### 🔧 Install Dependencies
 
 
