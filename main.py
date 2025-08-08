@@ -264,7 +264,7 @@ async def get_visualization_page(request: Request):
 
 @app.get("/graph-data")
 async def get_graph_data():
-    """Provides the RDF graph data in a D3-compatible JSON format with user-friendly labels."""
+    """Provides enhanced RDF graph data with smart styling and filtering capabilities."""
     nodes = {}
     links = []
     
@@ -272,17 +272,12 @@ async def get_graph_data():
         """Convert URIs to human-readable labels"""
         uri_str = str(uri_str)
         
-        # Handle different types of URIs
         if 'patient' in uri_str.lower():
-            # Extract patient ID from URI
             patient_id = uri_str.split('/')[-1]
             return f"Patient {patient_id}"
         
         elif 'dataset' in uri_str and 'file_' in uri_str:
-            # For DICOM files, get metadata from the graph
             file_uri = URIRef(uri_str)
-            
-            # Query for metadata about this file
             query = f"""
             SELECT ?modalityLabel ?patientId ?studyDate WHERE {{
                 <{uri_str}> <http://www.w3.org/ns/dcat#theme> ?modality .
@@ -298,61 +293,128 @@ async def get_graph_data():
                     row = results[0]
                     modality = str(row.modalityLabel)
                     patient_id = str(row.patientId)
-                    study_date = str(row.studyDate)
-                    return f"{modality} Scan - {patient_id}"
+                    return f"{modality} - {patient_id}"
                 else:
                     return "DICOM Dataset"
             except:
                 return "DICOM Dataset"
         
         elif 'snomed' in uri_str.lower():
-            # SNOMED CT codes - get the label if available
             concept_uri = URIRef(uri_str)
             for s, p, o in rdf_graph.triples((concept_uri, RDFS.label, None)):
-                return f"{str(o)} (SNOMED)"
-            # Fallback for known SNOMED codes
+                return f"{str(o)}"
             snomed_labels = {
                 "7771000": "CT Imaging",
-                "25064002": "MRI Imaging"
+                "25064002": "MR Imaging"
             }
             code = uri_str.split('/')[-1]
-            return snomed_labels.get(code, f"Medical Concept ({code})")
+            return snomed_labels.get(code, f"Medical Concept")
         
         elif 'roo' in uri_str.lower():
-            # ROO ontology codes
             concept_uri = URIRef(uri_str)
             for s, p, o in rdf_graph.triples((concept_uri, RDFS.label, None)):
-                return f"{str(o)} (ROO)"
-            # Fallback for known ROO codes
+                return f"{str(o)}"
             roo_labels = {
-                "ROO_00473": "RT Structure Set",
-                "ROO_00469": "RT Treatment Plan", 
-                "ROO_00472": "RT Dose Distribution"
+                "ROO_00473": "RT Structure",
+                "ROO_00469": "RT Plan", 
+                "ROO_00472": "RT Dose"
             }
             code = uri_str.split('/')[-1]
-            return roo_labels.get(code, f"RT Concept ({code})")
+            return roo_labels.get(code, f"RT Concept")
         
         else:
-            # Generic cleanup for other URIs
             label = uri_str.split('/')[-1].split('#')[-1]
             label = label.replace('_', ' ').replace('-', ' ')
-            # Capitalize first letter of each word
             return ' '.join(word.capitalize() for word in label.split())
     
-    def get_node_group(uri_str):
-        """Assign nodes to groups for better visualization"""
+    def get_node_info(uri_str):
+        """Get comprehensive node information including size, group, and importance"""
         uri_str = str(uri_str)
         
         if 'patient' in uri_str.lower():
-            return 'patient'
+            # Count how many scans this patient has
+            patient_uri = URIRef(uri_str)
+            scan_count = len(list(rdf_graph.triples((None, DCTERMS.subject, patient_uri))))
+            return {
+                'group': 'patient',
+                'size': min(8 + scan_count * 2, 20),  # Size based on number of scans
+                'importance': scan_count,
+                'type': 'hub'
+            }
+            
         elif 'dataset' in uri_str:
-            return 'dataset'  
-        elif 'snomed' in uri_str.lower():
-            return 'medical_concept'
-        elif 'roo' in uri_str.lower():
-            return 'rt_concept'
+            # Different sizes for different modalities
+            modality_sizes = {
+                'CT': 12, 'MR': 12, 'RTSTRUCT': 10, 
+                'RTPLAN': 10, 'RTDOSE': 10
+            }
+            label = get_friendly_label(uri_str)
+            for mod, size in modality_sizes.items():
+                if mod in label:
+                    return {
+                        'group': f'scan_{mod.lower()}',
+                        'size': size,
+                        'importance': 2,
+                        'type': 'data'
+                    }
+            return {'group': 'dataset', 'size': 10, 'importance': 2, 'type': 'data'}
+            
+        elif 'snomed' in uri_str.lower() or 'roo' in uri_str.lower():
+            # Count how many datasets link to this concept
+            concept_uri = URIRef(uri_str)
+            usage_count = len(list(rdf_graph.triples((None, DCAT.theme, concept_uri))))
+            return {
+                'group': 'concept',
+                'size': min(6 + usage_count, 16),
+                'importance': usage_count,
+                'type': 'concept'
+            }
+            
         else:
-            return 'other'
+            return {'group': 'other', 'size': 8, 'importance': 1, 'type': 'other'}
+
+    def get_link_style(predicate_uri):
+        """Determine link styling based on relationship type"""
+        predicate = str(predicate_uri).split('/')[-1].split('#')[-1]
+        
+        styles = {
+            'subject': {  # about patient
+                'style': 'solid',
+                'width': 2,
+                'color': '#e74c3c',
+                'label': '',  # No label - use visual style
+                'importance': 3
+            },
+            'theme': {  # has modality
+                'style': 'dashed', 
+                'width': 1.5,
+                'color': '#3498db',
+                'label': '',
+                'importance': 2
+            },
+            'type': {  # is a
+                'style': 'dotted',
+                'width': 1,
+                'color': '#95a5a6',
+                'label': '',
+                'importance': 1
+            },
+            'identifier': {
+                'style': 'solid',
+                'width': 1,
+                'color': '#f39c12',
+                'label': '',
+                'importance': 1
+            }
+        }
+        
+        return styles.get(predicate, {
+            'style': 'solid',
+            'width': 1,
+            'color': '#bdc3c7',
+            'label': predicate.replace('_', ' '),
+            'importance': 1
+        })
 
     # Process all triples to build nodes and links
     for s, p, o in rdf_graph:
@@ -361,33 +423,37 @@ async def get_graph_data():
             if isinstance(item, URIRef):
                 uri_str = str(item)
                 if uri_str not in nodes:
+                    node_info = get_node_info(uri_str)
                     nodes[uri_str] = {
                         "id": uri_str,
                         "label": get_friendly_label(uri_str),
-                        "group": get_node_group(uri_str),
-                        "type": "uri"
+                        "group": node_info['group'],
+                        "size": node_info['size'],
+                        "importance": node_info['importance'],
+                        "type": node_info['type']
                     }
         
         # Add links between URI nodes
         if isinstance(s, URIRef) and isinstance(o, URIRef):
-            predicate_label = str(p).split('/')[-1].split('#')[-1]
-            # Make predicate labels more readable
-            predicate_friendly = {
-                'type': 'is a',
-                'theme': 'has modality',
-                'subject': 'about patient',
-                'identifier': 'has ID',
-                'issued': 'created on',
-                'title': 'titled',
-                'label': 'labeled as'
-            }.get(predicate_label, predicate_label.replace('_', ' '))
-            
+            link_style = get_link_style(p)
             links.append({
                 "source": str(s),
                 "target": str(o),
-                "predicate": predicate_friendly,
-                "type": predicate_label
+                "predicate": str(p).split('/')[-1].split('#')[-1],
+                "label": link_style['label'],
+                "style": link_style['style'],
+                "width": link_style['width'],
+                "color": link_style['color'],
+                "importance": link_style['importance']
             })
+
+    # Calculate statistics
+    node_groups = {}
+    for node in nodes.values():
+        group = node['group']
+        if group not in node_groups:
+            node_groups[group] = 0
+        node_groups[group] += 1
 
     return JSONResponse(content={
         "nodes": list(nodes.values()), 
@@ -395,12 +461,10 @@ async def get_graph_data():
         "stats": {
             "total_nodes": len(nodes),
             "total_links": len(links),
-            "node_types": {
-                "patients": len([n for n in nodes.values() if n["group"] == "patient"]),
-                "datasets": len([n for n in nodes.values() if n["group"] == "dataset"]),
-                "medical_concepts": len([n for n in nodes.values() if n["group"] == "medical_concept"]),
-                "rt_concepts": len([n for n in nodes.values() if n["group"] == "rt_concept"])
-            }
+            "node_groups": node_groups,
+            "patients": len([n for n in nodes.values() if n["group"] == "patient"]),
+            "scans": len([n for n in nodes.values() if n["type"] == "data"]),
+            "concepts": len([n for n in nodes.values() if n["type"] == "concept"])
         }
     })
 
