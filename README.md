@@ -1,69 +1,159 @@
-# DFDP2
+# 🧠 DFDP2 – DICOM to RDF Processing and Visualization Demo
 
-DICOM to RDF Processing and Visualization Demo
-This project is a self-contained web application that demonstrates a complete pipeline for processing DICOM files, transforming their metadata into a semantic Knowledge Graph, and providing a user-friendly interface to explore the data.
+This project is a **self-contained web application** that demonstrates a complete pipeline for:
 
-It is built with Python using the FastAPI framework for the web server, pydicom for handling DICOM files, and rdflib for creating and querying RDF data.
+- Processing DICOM files
+- Extracting key metadata
+- Mapping it to semantic ontologies (ROO, SNOMED CT, FOAF, etc.)
+- Generating an in-memory **RDF knowledge graph**
+- Providing a **web-based interface** for dataset discovery, SPARQL querying, and graph visualization
 
-Features
-DICOM Processing: Automatically processes 50 mock DICOM files on startup to populate the system with initial data.
+Built with **Python**, the app uses:
+- `FastAPI` for the web server
+- `pydicom` for handling DICOM files
+- `rdflib` for RDF generation and SPARQL querying
+- `D3.js` for frontend graph visualization
 
-Metadata Extraction: Pulls key metadata fields like Patient ID, Study Date, and Modality from DICOM headers.
+---
 
-Semantic Mapping: Maps extracted metadata to standard ontologies, including the Radiation Oncology Ontology (ROO) and SNOMED CT.
+## 🚀 Features
 
-RDF Generation: Converts the mapped metadata into RDF triples, building an in-memory knowledge graph.
+| Feature | Description |
+|--------|-------------|
+| 🏥 **DICOM Processing** | Generates 50 mock DICOM files on startup |
+| 📑 **Metadata Extraction** | Extracts Patient ID, Study Date, Modality, Accession Number |
+| 📚 **Semantic Mapping** | Maps values to ROO, SNOMED CT, and FOAF ontologies |
+| 🔗 **RDF Generation** | Builds triples and populates an in-memory knowledge graph |
+| 🔍 **SPARQL Endpoint** | Supports SPARQL 1.1 queries via a web form |
+| 📂 **Metadata Catalog** | Web interface styled after FAIR Data Platforms (Health DCAT-AP) |
+| 🕸️ **Knowledge Graph Visualization** | In-browser graph using force-directed layout |
+| ⬆️ **DICOM Upload** | Upload your own DICOMs and enrich the graph dynamically |
 
-SPARQL Endpoint: Provides a full SPARQL 1.1 compliant endpoint to query the graph.
+---
 
-Metadata Catalog: A web interface styled after the Swiss Fair Data Platform (FDP) and compliant with Health DCAT-AP for dataset discovery.
+## 📦 Installation
 
-Knowledge Graph Visualization: An interactive, in-browser visualization of the RDF graph using D3.js.
+### ✅ Prerequisites
 
-Extensibility: Allows for the upload of new DICOM files to dynamically extend the knowledge graph.
+- Python 3.7+
+- pip (Python package manager)
 
-Setup and Running the Application
-1. Prerequisites
-Python 3.7+
+### 🔧 Install Dependencies
 
-pip (Python package installer)
 
-2. Installation
-First, save the Python code from the Canvas to a file named main.py. Then, open your terminal or command prompt and run the following command to install the necessary Python libraries:
-
+```bash
 pip install fastapi uvicorn "pydantic[email]" pydicom rdflib requests python-multipart jinja2
+```
 
-3. Running the Server
-Once the installation is complete, navigate to the directory where you saved main.py and run the following command:
+## ▶️ Running the Application
 
+1. Save the application code as `main.py`
+2. In the same directory, run:
+
+```bash
 uvicorn main:app --reload
+```
+3. Visit: [http://127.0.0.1:8000](http://127.0.0.1:8000)
 
-You should see output indicating that the server is running, similar to this:
+You’ll see logs like:
 
+```
 INFO:     Uvicorn running on http://127.0.0.1:8000 (Press CTRL+C to quit)
-INFO:     Started reloader process [xxxxx]
 INFO:     Started server process [xxxxx]
-INFO:     Waiting for application startup.
 INFO:     Application startup complete.
+```
+## 🌐 Web Interface Overview
+| Page             | URL          | Description                                     |
+| ---------------- | ------------ | ----------------------------------------------- |
+| 🏠 **Home**      | `/`          | Upload DICOMs, view summary                     |
+| 📚 **Catalog**   | `/catalog`   | View/search processed DICOM datasets            |
+| 🌐 **SPARQL**    | `/` (form)   | Query the RDF graph using SPARQL                |
+| 🧬 **Visualize** | `/visualize` | Interactive graph of datasets and relationships |
 
-The application is now running and accessible in your web browser.
+## ⚙️ How It Works
 
-Exploring the Application
-Open your web browser and navigate to http://127.0.0.1:8000.
+### On Startup
 
-Home Page (/): This is the main landing page. It provides an overview of the application's features, an interface to test SPARQL queries directly, and a form to upload new DICOM files.
+- 50 mock DICOM files are created in `dicom_files/`
+- Metadata like `PatientID`, `StudyDate`, and `Modality` are extracted
+- Mapped to SNOMED CT and ROO terms
+- RDF triples are generated and stored in an in-memory `rdflib.Graph`
 
-Metadata Catalog (/catalog): This page presents the processed DICOM files as a list of datasets. You can use the search boxes to filter by Modality or Accession Number to discover specific datasets.
+### On File Upload
 
-Visualize Graph (/visualize): This page provides an interactive, force-directed graph of the RDF data.
+- Uploaded DICOMs are saved to `dicom_uploads/`
+- Metadata is extracted and converted into RDF
+- The knowledge graph is updated live
 
-Nodes are colored by type (e.g., Patient, Modality, Dataset).
+## 🧪 SPARQL Query Example
 
-You can click and drag nodes to rearrange the graph and better explore connections.
+Query all DICOM datasets where the modality is **CT**:
 
-Hover over nodes and links to see their identifiers and relationships.
+```sparql
+PREFIX dcterms: <http://purl.org/dc/terms/>
+PREFIX schema: <http://schema.org/>
+PREFIX dcat: <http://www.w3.org/ns/dcat#>
+PREFIX rdfs: <http://www.w3.org/2000/01/rdf-schema#>
 
-How It Works
-On Startup: The application automatically creates a dicom_files/ directory with 50 mock DICOM files, processes them, and populates an in-memory RDF graph. It also creates a templates/ directory containing the HTML for the web pages.
+SELECT ?dataset ?title ?patientId ?studyDate ?accessionNumber
+WHERE {
+  ?dataset a <http://health.data.gov.eu/def/dcat-ap/Dataset> .
+  ?dataset dcterms:title ?title .
+  ?dataset dcterms:subject ?patient .
+  ?patient schema:identifier ?patientId .
+  ?dataset dcterms:issued ?studyDate .
+  ?dataset dcat:theme ?modality .
+  ?modality rdfs:label "CT" .
+  ?dataset schema:accessionNumber ?accessionNumber .
+}
+ORDER BY ?studyDate
+```
 
-File Uploads: When you upload a new DICOM file, it is saved to a dicom_uploads/ directory, and its metadata is immediately processed and added to the live knowledge graph.
+## 📚 Ontologies Used
+
+| Prefix    | URI                                             |
+|-----------|--------------------------------------------------|
+| `ROO`     | http://www.cancerdata.org/roo/                  |
+| `SNOMED`  | http://snomed.info/sct/                         |
+| `DCAT`    | http://www.w3.org/ns/dcat#                      |
+| `HDCAT`   | http://health.data.gov.eu/def/dcat-ap/         |
+| `SCHEMA`  | http://schema.org/                              |
+| `FOAF`    | http://xmlns.com/foaf/0.1/                      |
+| `DCTERMS` | http://purl.org/dc/terms/                       |
+---
+
+## 📁 Directory Structure
+
+```
+.
+├── main.py             # FastAPI application
+├── templates/          # HTML templates (auto-generated)
+├── static/             # Static assets (CSS/JS)
+├── dicom_files/        # Uploaded DICOMs via Script
+
+```
+---
+
+## 📈 Visualization
+
+At `/visualize`, you'll find a **D3.js-based graph** of the RDF data:
+
+- Nodes are color-coded by type (e.g., Patient, Modality)
+- Drag nodes to explore relationships
+- Hover over nodes and edges to view URIs and labels
+
+---
+
+## 📌 To-Do / Ideas for Future
+
+- [ ] Persistent RDF store (e.g., Blazegraph, Fuseki)
+- [ ] Support for real-world DICOM tags and vocabularies
+- [ ] Authentication for upload and SPARQL features
+- [ ] Multi-user catalog and permission system
+
+---
+
+## 📄 License
+
+**MIT License**  
+Free to use, modify, and distribute with proper attribution.

@@ -168,7 +168,16 @@ def generate_rdf_triples(metadata: Dict[str, Any], mapped_data: Dict[str, Any]):
 
     # Add other metadata
     rdf_graph.add((instance_uri, SCHEMA.accessionNumber, Literal(metadata['AccessionNumber'])))
-    rdf_graph.add((instance_uri, DCTERMS.issued, Literal(metadata['StudyDate'], datatype=XSD.date)))
+    #rdf_graph.add((instance_uri, DCTERMS.issued, Literal(metadata['StudyDate'], datatype=XSD.date)))
+    from datetime import datetime
+
+    # Convert 'YYYYMMDD' to 'YYYY-MM-DD'
+    raw_date = metadata['StudyDate']
+    try:
+        formatted_date = datetime.strptime(raw_date, '%Y%m%d').date().isoformat()
+        rdf_graph.add((instance_uri, DCTERMS.issued, Literal(formatted_date, datatype=XSD.date)))
+    except ValueError:
+        print(f"Invalid StudyDate format: {raw_date}")
 
 def process_all_dicoms(dicom_dir: str):
     """Processes all DICOM files in a directory."""
@@ -191,7 +200,7 @@ def on_startup():
     # 2. Process data and populate RDF graph
     process_all_dicoms(dicom_dir)
     # 3. Create HTML templates in memory (since we can't ship files easily)
-    create_html_templates()
+   # create_html_templates()
 
 # --- FastAPI Endpoints ---
 
