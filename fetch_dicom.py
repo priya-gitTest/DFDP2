@@ -12,6 +12,11 @@ def element_to_dict(elem):
     """
     Convert a single DataElement to a JSON-friendly dict, keeping tag and VR.
     """
+
+    # Skip Pixel Data tag
+    if elem.tag == 0x7FE00010:
+        return None
+    
     tag_str = f"({elem.tag.group:04X},{elem.tag.element:04X})"
     
     # Handle sequences recursively
