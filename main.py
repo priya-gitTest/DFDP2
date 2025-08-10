@@ -1,6 +1,7 @@
 # main.py
 import json
 import os
+from collections import defaultdict
 from fastapi import FastAPI, UploadFile, File, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, HTMLResponse
@@ -47,10 +48,26 @@ app.add_middleware(
 class SPARQLQuery(BaseModel):
     query: str
 
+class CatalogMetadata(BaseModel):
+    conformsTo: str | None
+    publisher: str | None
+    language: str | None
+    issued: str | None
+    name: str | None
+
 class CatalogItem(BaseModel):
     uri: str
-    title: str
-    description: str
+    title: str | None
+    description: str | None
+    numRecords: int
+    publisher: str | None
+    issued: str | None
+    identifier: str | None
+    creators: list[str]
+
+class Catalog(BaseModel):
+    metadata: CatalogMetadata
+    datasets: list[CatalogItem]
 
 @app.get("/", response_class=HTMLResponse)
 async def root(request: Request):
@@ -85,6 +102,8 @@ async def sparql_query_endpoint(sparql_query: SPARQLQuery):
             for key, value in result.items():
                 if isinstance(value, URIRef):
                     result[key] = str(value)
+                elif isinstance(value, int):
+                    result[key] = int(value)
 
         return JSONResponse(content={"results": results})
     except Exception as e:
@@ -93,33 +112,103 @@ async def sparql_query_endpoint(sparql_query: SPARQLQuery):
 @app.get("/api/catalog")
 async def get_catalog_datasets_api():
     """
-    Retrieves a list of datasets from the catalog.
+    Retrieves a list of all catalogs, each containing its metadata and datasets.
     """
     query = """
     PREFIX dcat: <http://www.w3.org/ns/dcat#>
     PREFIX dcterms: <http://purl.org/dc/terms/>
-    SELECT ?dataset ?title ?description
+    PREFIX foaf: <http://xmlns.com/foaf/0.1/>
+    PREFIX custom_dicom: <http://example.org/dicom/private#>
+
+    SELECT ?catalog ?catalogPublisher ?catalogIssued ?dataset ?datasetTitle ?datasetDescription ?datasetCreator ?datasetIssued ?datasetPublisher ?datasetIdentifier ?distribution ?conformsTo ?language ?name
     WHERE {
-      ?catalog a dcat:Catalog ;
-               dcat:dataset ?dataset .
-      ?dataset dcterms:title ?title ;
-               dcterms:description ?description .
+      ?catalog a dcat:Catalog .
+      OPTIONAL { ?catalog dcterms:publisher ?catalogPublisher . }
+      OPTIONAL { ?catalog dcterms:issued ?catalogIssued . }
+      OPTIONAL { ?catalog dcterms:conformsTo ?conformsTo . }
+      OPTIONAL { ?catalog dcterms:language ?language . }
+      OPTIONAL { ?catalog custom_dicom:collectionName ?name . }
+      OPTIONAL { ?catalog dcat:dataset ?dataset .
+                 OPTIONAL { ?dataset dcterms:title ?datasetTitle . }
+                 OPTIONAL { ?dataset dcterms:description ?datasetDescription . }
+                 OPTIONAL { ?dataset dcterms:creator ?datasetCreator . }
+                 OPTIONAL { ?dataset dcterms:issued ?datasetIssued . }
+                 OPTIONAL { ?dataset dcterms:publisher ?datasetPublisher . }
+                 OPTIONAL { ?dataset dcterms:identifier ?datasetIdentifier . }
+                 OPTIONAL { ?dataset dcat:distribution ?distribution . }
+               }
     }
     """
-    try:
-        qres = g.query(query)
-        catalog_items = []
-        for row in qres:
-            catalog_items.append(
+    
+    qres = g.query(query)
+    
+    catalogs_data = defaultdict(lambda: {
+        "metadata": {
+            "conformsTo": "N/A", "publisher": "N/A", "language": "N/A", "issued": "N/A", "name": "N/A"
+        },
+        "datasets": defaultdict(lambda: {
+            "title": "N/A", "description": "N/A", "numRecords": 0, "publisher": "N/A",
+            "issued": "N/A", "identifier": "N/A", "creators": set()
+        })
+    })
+
+    for row in qres:
+        catalog_uri = str(row.catalog)
+        
+        # Process catalog metadata
+        if row.conformsTo:
+            catalogs_data[catalog_uri]["metadata"]["conformsTo"] = str(row.conformsTo)
+        if row.catalogPublisher:
+            catalogs_data[catalog_uri]["metadata"]["publisher"] = str(row.catalogPublisher)
+        if row.language:
+            catalogs_data[catalog_uri]["metadata"]["language"] = str(row.language)
+        if row.catalogIssued:
+            catalogs_data[catalog_uri]["metadata"]["issued"] = str(row.catalogIssued)
+        if row.name:
+            catalogs_data[catalog_uri]["metadata"]["name"] = str(row.name)
+
+        # Process dataset data, only if a dataset is present in the row
+        if row.dataset:
+            dataset_uri = str(row.dataset)
+            dataset = catalogs_data[catalog_uri]["datasets"][dataset_uri]
+            
+            dataset["title"] = str(row.datasetTitle) if row.datasetTitle else dataset["title"]
+            dataset["description"] = str(row.datasetDescription) if row.datasetDescription else dataset["description"]
+            if row.distribution:
+                dataset["numRecords"] += 1
+            if row.datasetPublisher:
+                dataset["publisher"] = str(row.datasetPublisher)
+            if row.datasetIssued:
+                dataset["issued"] = str(row.datasetIssued)
+            if row.datasetIdentifier:
+                dataset["identifier"] = str(row.datasetIdentifier)
+            if row.datasetCreator:
+                dataset["creators"].add(str(row.datasetCreator))
+    
+    result_catalogs = []
+    for catalog_uri, data in catalogs_data.items():
+        datasets_list = []
+        for dataset_uri, dataset_data in data["datasets"].items():
+            datasets_list.append(
                 CatalogItem(
-                    uri=str(row.dataset),
-                    title=str(row.title),
-                    description=str(row.description)
+                    uri=dataset_uri,
+                    title=dataset_data["title"],
+                    description=dataset_data["description"],
+                    numRecords=dataset_data["numRecords"],
+                    publisher=dataset_data["publisher"],
+                    issued=dataset_data["issued"],
+                    identifier=dataset_data["identifier"],
+                    creators=sorted(list(dataset_data["creators"])),
                 ).dict()
             )
-        return {"datasets": catalog_items}
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Error querying catalog: {e}")
+        result_catalogs.append(
+            Catalog(
+                metadata=CatalogMetadata(**data["metadata"]),
+                datasets=datasets_list
+            ).dict()
+        )
+    
+    return {"catalogs": result_catalogs}
 
 @app.get("/api/visualize")
 async def get_graph_data_for_visualization_api():

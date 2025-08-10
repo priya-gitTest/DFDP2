@@ -13,6 +13,8 @@ LDP = Namespace("http://www.w3.org/ns/ldp#")
 OWL = Namespace("http://www.w3.org/2002/07/owl#")
 NCIT = Namespace("http://ncicb.nci.nih.gov/xml/owl/EVS/Thesaurus.owl#")
 DICOM = Namespace("http://dicom.nema.org/resources/ontology/DCM#")
+# Custom namespace for private DICOM tags
+CUSTOM_DICOM = Namespace("http://example.org/dicom/private#")
 
 # SNOMED mapping for certain terms (expand as needed)
 snomed_mapping = {
@@ -69,6 +71,8 @@ mapping = {
     "Columns": (DICOM.Columns,),
     "Reason for Study": (ROO.hasReasonForStudy,),
     "Study Comments": (ROO.hasStudyComment,),
+    # Map the private tag to a custom property
+    "(0009,xx10)": (CUSTOM_DICOM.collectionName,),
 }
 
 def parse_value(value, vr):
@@ -107,20 +111,42 @@ def json_to_rdf(json_file, output_file):
     g.bind("owl", OWL)
     g.bind("ncit", NCIT)
     g.bind("dicom", DICOM)
+    g.bind("custom_dicom", CUSTOM_DICOM)
 
     with open(json_file) as f:
         data = json.load(f)
 
-    catalog_uri = URIRef("http://example.org/catalog")
-    dataset_uri = URIRef("http://example.org/dataset/dicom_dataset")
+    # Find the collection name from the private DICOM tag to create dynamic URIs
+    catalog_name = "default-catalog"
+    for item in data:
+        for elem in item.get("Dataset", []):
+            if elem.get("Tag") == "(0009,xx10)" and elem.get("Value"):
+                catalog_name = elem.get("Value")
+                break
+        if catalog_name != "default-catalog":
+            break
+
+    # Use the dynamic catalog name to create URIs
+    catalog_uri = URIRef(f"https://doi.org/10.7937/K9/TCIA.2016.9ZFRVF1B,TCGA-DE-A4MA")
+    dataset_uri = URIRef(f"http://example.org/dataset/{catalog_name.lower()}")
 
     # Create DCAT catalog and dataset
     g.add((catalog_uri, RDF.type, DCAT.Catalog))
     g.add((catalog_uri, DCAT.dataset, dataset_uri))
 
+    # Add new catalog-level metadata
+    g.add((catalog_uri, DCTERMS.publisher, Literal("Priyanka Demo Publisher")))
+    g.add((catalog_uri, DCTERMS.language, URIRef("http://id.loc.gov/vocabulary/iso639-1/en")))
+    g.add((catalog_uri, DCTERMS.issued, Literal("2024-12-06T09:44:47.348964449Z", datatype=XSD.dateTime)))
+    g.add((catalog_uri, CUSTOM_DICOM.collectionName, Literal(catalog_name)))
+
     g.add((dataset_uri, RDF.type, DCAT.Dataset))
     g.add((dataset_uri, DCTERMS.title, Literal("DICOM Metadata Dataset")))
     g.add((dataset_uri, DCTERMS.description, Literal("A dataset containing DICOM metadata mapped to ontologies.")))
+    g.add((dataset_uri, DCTERMS.identifier, Literal("https://doi.org/10.7937/K9/TCIA.2016.9ZFRVF1B,TCGA-DE-A4MA")))
+    g.add((dataset_uri, DCTERMS.issued, Literal("2025-02-27T00:00:14.382676", datatype=XSD.dateTime)))
+    g.add((dataset_uri, DCTERMS.creator, Literal("Priyanka Demo Creator"))) ;
+
 
     for item in data:
         file_path = item.get("FilePath")
@@ -136,10 +162,10 @@ def json_to_rdf(json_file, output_file):
             name = elem.get("Name")
             vr = elem.get("VR")
             value = elem.get("Value")
+            tag = elem.get("Tag")
 
             if name in mapping and value is not None:
                 props = mapping[name]
-
                 for prop in props:
                     # Special case: map certain body part text values to SNOMED URI if possible
                     if prop == ROO.hasAnatomicSite and isinstance(value, str):

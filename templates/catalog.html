@@ -6,14 +6,16 @@
     <p class="text-lg text-gray-600 max-w-2xl mb-8">
         Browse the list of DICOM datasets available in the knowledge graph.
     </p>
-    <div id="catalog-list" class="w-full max-w-4xl space-y-4">
+
+    <!-- Main container for all catalogs -->
+    <div id="catalogs-container" class="w-full max-w-4xl space-y-8">
         <p id="loading-message" class="text-center text-gray-500">Loading catalog...</p>
     </div>
 </div>
 
 <script>
     document.addEventListener('DOMContentLoaded', async () => {
-        const catalogList = document.getElementById('catalog-list');
+        const catalogsContainer = document.getElementById('catalogs-container');
         const loadingMessage = document.getElementById('loading-message');
 
         try {
@@ -25,19 +27,59 @@
             
             loadingMessage.classList.add('hidden');
 
-            if (data.datasets.length > 0) {
-                data.datasets.forEach(dataset => {
-                    const card = document.createElement('div');
-                    card.className = 'bg-white p-6 rounded-lg shadow-md hover:shadow-lg transition duration-300';
-                    card.innerHTML = `
-                        <h2 class="text-2xl font-semibold text-indigo-600 mb-2">${dataset.title}</h2>
-                        <p class="text-gray-700">${dataset.description}</p>
-                        <a href="#" class="text-indigo-500 hover:text-indigo-700 font-medium mt-2 block">View Details &rarr;</a>
+            if (data.catalogs && data.catalogs.length > 0) {
+                data.catalogs.forEach(catalog => {
+                    const catalogElement = document.createElement('div');
+                    catalogElement.className = 'bg-gray-100 p-6 rounded-lg shadow-inner';
+                    
+                    // Catalog Metadata Section
+                    const catalogMetadata = catalog.metadata;
+                    const metadataHTML = `
+                        <h2 class="text-2xl font-semibold text-gray-800 mb-4">Catalog: ${catalogMetadata.name || 'N/A'}</h2>
+                        <div class="grid grid-cols-1 md:grid-cols-2 gap-4 text-left text-sm text-gray-600 mb-6">
+                            <p><strong>Publisher:</strong> ${catalogMetadata.publisher || 'N/A'}</p>
+                            <p><strong>Issued:</strong> ${catalogMetadata.issued || 'N/A'}</p>
+                            <p><strong>Conforms To:</strong> ${catalogMetadata.conformsTo || 'N/A'}</p>
+                            <p><strong>Language:</strong> ${catalogMetadata.language || 'N/A'}</p>
+                        </div>
                     `;
-                    catalogList.appendChild(card);
+                    catalogElement.innerHTML += metadataHTML;
+                    
+                    // Datasets List Section
+                    const datasetsList = document.createElement('div');
+                    datasetsList.className = 'w-full space-y-4';
+                    
+                    if (catalog.datasets.length > 0) {
+                        catalog.datasets.forEach(dataset => {
+                            const card = document.createElement('div');
+                            card.className = 'bg-white p-6 rounded-lg shadow-md hover:shadow-lg transition duration-300';
+                            
+                            const creatorNames = dataset.creators.length > 0
+                                ? dataset.creators.join(', ')
+                                : 'N/A';
+
+                            card.innerHTML = `
+                                <h3 class="text-xl font-semibold text-indigo-600 mb-2">${dataset.title || 'N/A'}</h3>
+                                <p class="text-gray-700 mb-2">${dataset.description || 'N/A'}</p>
+                                <div class="grid grid-cols-2 gap-2 text-sm text-gray-600 mb-4">
+                                    <p><strong>Publisher:</strong> ${dataset.publisher || 'N/A'}</p>
+                                    <p><strong>Issued:</strong> ${dataset.issued || 'N/A'}</p>
+                                    <p><strong>Records:</strong> ${dataset.numRecords}</p>
+                                    <p><strong>Creators:</strong> ${creatorNames}</p>
+                                </div>
+                                <button class="text-indigo-500 hover:text-indigo-700 font-medium mt-2 block" onclick="showDetails('${dataset.uri}')">View Details &rarr;</button>
+                            `;
+                            datasetsList.appendChild(card);
+                        });
+                    } else {
+                        datasetsList.innerHTML = '<p class="text-center text-gray-500">No datasets found in this catalog.</p>';
+                    }
+                    
+                    catalogElement.appendChild(datasetsList);
+                    catalogsContainer.appendChild(catalogElement);
                 });
             } else {
-                catalogList.innerHTML = '<p class="text-center text-gray-500">No datasets found in the catalog.</p>';
+                catalogsContainer.innerHTML = '<p class="text-center text-gray-500">No catalogs found.</p>';
             }
 
         } catch (error) {
@@ -46,5 +88,10 @@
             loadingMessage.classList.remove('hidden');
         }
     });
+
+    function showDetails(uri) {
+        // Log the URI to the console instead of using an alert
+        console.log('Viewing details for URI:', uri);
+    }
 </script>
 {% endblock %}
