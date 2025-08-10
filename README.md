@@ -88,12 +88,12 @@ INFO:     Application startup complete.
 
 ## ⚙️ How It Works
 
-### On Startup
+### Run Scripts to
 
-- 50 mock DICOM files are created in `dicom_files/`
+- Extracting Metadata from DICOM files picked from TCIA and stored in `dicom_files/`
 - Metadata like `PatientID`, `StudyDate`, and `Modality` are extracted
-- Mapped to SNOMED CT and ROO terms
-- RDF triples are generated and stored in an in-memory `rdflib.Graph`
+- Map to SNOMED CT and ROO terms
+- RDF triples are generated
 
 ## 🧪 SPARQL Query Example
 
