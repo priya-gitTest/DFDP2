@@ -5,6 +5,9 @@ __pycache__/
 
 #Ignore all .dcm files anywhere in the repo
 *.dcm
+*.json
+*.ttl
+*.jsonld
 
 # C extensions
 *.so

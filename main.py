@@ -1,516 +1,107 @@
-
-# main.py
-
-import os
-import uuid
-import json
-from datetime import datetime
-from typing import List, Dict, Any
-
-import pydicom
-from pydicom.dataset import Dataset, FileMetaDataset
-from pydicom.uid import generate_uid
-
-from fastapi import FastAPI, Request, File, UploadFile, Form, HTTPException
+from fastapi import FastAPI, Request, Form
 from fastapi.responses import HTMLResponse, JSONResponse
 from fastapi.templating import Jinja2Templates
-from fastapi.staticfiles import StaticFiles
+from rdflib import Graph, URIRef, Namespace
+from rdflib.namespace import RDF, DCAT
+import os
 
-from rdflib import Graph, URIRef, Literal, Namespace
-from rdflib.namespace import RDF, RDFS, DCTERMS, XSD, FOAF
-from rdflib.plugins.sparql import prepareQuery
-
-# --- Configuration & Namespaces ---
-# Using namespaces for creating well-formed RDF data.
-BASE_URI = "http://local.dev/dicom-demo/"
-DATASET_URI = URIRef(f"{BASE_URI}dataset/")
-PID_PREFIX = "https://w3id.org/purl/pid/"
-
-# Standard and custom namespaces
-ROO = Namespace("http://www.cancerdata.org/roo/")
-SNOMED = Namespace("http://snomed.info/sct/")
-DCAT = Namespace("http://www.w3.org/ns/dcat#")
-HDCAT = Namespace("http://health.data.gov.eu/def/dcat-ap/")
-SCHEMA = Namespace("http://schema.org/")
-
-# In-memory graph to store RDF triples
-rdf_graph = Graph()
-
-# FastAPI application setup
-app = FastAPI(
-    title="DICOM RDF Processor",
-    description="A demo for processing DICOM metadata, generating RDF, and providing a SPARQL endpoint.",
-    version="1.0.0"
-)
-
-# Setup for templates and static files
+app = FastAPI()
 templates = Jinja2Templates(directory="templates")
-# This is a bit of a trick for a single-file app. We'll create the dir if it doesn't exist.
-if not os.path.exists("templates"):
-    os.makedirs("templates")
-if not os.path.exists("static"):
-    os.makedirs("static")
 
-app.mount("/static", StaticFiles(directory="static"), name="static")
+DATA_FILE = "dicom_mapped_with_catalog.ttl"
 
+# Load RDF graph once at startup
+rdf_graph = Graph()
+if os.path.exists(DATA_FILE):
+    rdf_graph.parse(DATA_FILE, format="turtle")
+else:
+    print(f"Warning: RDF data file {DATA_FILE} not found.")
 
-# --- Mock Data Generation ---
-# In a real scenario, you would process actual DICOM files.
-# For this demo, we generate mock DICOM data.
-
-def create_mock_dicom_file(file_path: str, patient_id: str, study_date: str, modality: str, accession_number: str):
-    """Generates a mock DICOM file with essential metadata."""
-    file_meta = FileMetaDataset()
-    file_meta.MediaStorageSOPClassUID = pydicom.uid.ImplicitVRLittleEndian
-    file_meta.MediaStorageSOPInstanceUID = generate_uid()
-    file_meta.TransferSyntaxUID = pydicom.uid.ImplicitVRLittleEndian
-
-    ds = Dataset()
-    ds.file_meta = file_meta
-
-    ds.PatientID = patient_id
-    ds.StudyDate = study_date
-    ds.Modality = modality
-    ds.AccessionNumber = accession_number
-    ds.PatientName = f"Anonymized^{patient_id}"
-    ds.StudyDescription = f"Study for {modality}"
-    ds.SOPClassUID = pydicom.uid.RTImageStorage
-    ds.is_little_endian = True
-    ds.is_implicit_VR = True
-
-    ds.save_as(file_path, write_like_original=False)
-
-def generate_initial_dicom_files():
-    """Generates 50 mock DICOM files for initial processing."""
-    dicom_dir = "dicom_files"
-    if not os.path.exists(dicom_dir):
-        os.makedirs(dicom_dir)
-    
-    modalities = ["CT", "MR", "RTSTRUCT", "RTPLAN", "RTDOSE"]
-    for i in range(50):
-        patient_id = f"PAT_{1000 + i}"
-        study_date = datetime(2023, (i % 12) + 1, (i % 28) + 1).strftime('%Y%m%d')
-        modality = modalities[i % len(modalities)]
-        accession_number = f"ACC_{5000 + i}"
-        file_path = os.path.join(dicom_dir, f"file_{i}.dcm")
-        create_mock_dicom_file(file_path, patient_id, study_date, modality, accession_number)
-    return dicom_dir
-
-# --- Metadata Extraction and Mapping ---
-def extract_dicom_metadata(file_path: str) -> Dict[str, Any]:
-    """Extracts relevant metadata from a DICOM file."""
-    try:
-        ds = pydicom.dcmread(file_path, force=True)
-        return {
-            "PatientID": getattr(ds, "PatientID", "N/A"),
-            "StudyDate": getattr(ds, "StudyDate", "N/A"),
-            "Modality": getattr(ds, "Modality", "N/A"),
-            "AccessionNumber": getattr(ds, "AccessionNumber", "N/A"),
-            "FilePath": file_path
-        }
-    except Exception as e:
-        print(f"Error reading {file_path}: {e}")
-        return None
-
-def map_to_ontologies(metadata: Dict[str, Any]) -> Dict[str, URIRef]:
-    """Maps extracted metadata to ROO and SNOMED CT concepts."""
-    # This is a simplified mapping. A real implementation would use a more robust lookup service.
-    modality_map = {
-        "CT": SNOMED["7771000"],  # Computed tomography
-        "MR": SNOMED["25064002"], # Magnetic resonance imaging
-        "RTSTRUCT": ROO["ROO_00473"], # Radiotherapy Structure Set
-        "RTPLAN": ROO["ROO_00469"],   # Radiotherapy Plan
-        "RTDOSE": ROO["ROO_00472"],   # Radiotherapy Dose
-    }
-    
-    mapped_data = {}
-    modality = metadata.get("Modality")
-    if modality and modality in modality_map:
-        mapped_data["ModalityConcept"] = modality_map[modality]
-    
-    # Map PatientID to a persistent identifier
-    patient_pid = URIRef(f"{PID_PREFIX}patient/{metadata['PatientID']}")
-    mapped_data["PatientPID"] = patient_pid
-
-    return mapped_data
-
-# --- RDF Generation ---
-def generate_rdf_triples(metadata: Dict[str, Any], mapped_data: Dict[str, Any]):
-    """Generates RDF triples for a single DICOM file and adds them to the graph."""
-    # Create a unique URI for the DICOM dataset instance
-    instance_id = os.path.basename(metadata['FilePath'])
-    instance_uri = URIRef(f"{DATASET_URI}{instance_id}")
-
-    # Add triples
-    rdf_graph.add((instance_uri, RDF.type, HDCAT.Dataset))
-    rdf_graph.add((instance_uri, DCTERMS.identifier, Literal(instance_id)))
-    rdf_graph.add((instance_uri, DCTERMS.title, Literal(f"DICOM data for {metadata['PatientID']} on {metadata['StudyDate']}")))
-    
-    # Link to patient PID
-    patient_pid = mapped_data.get("PatientPID")
-    if patient_pid:
-        rdf_graph.add((instance_uri, DCTERMS.subject, patient_pid))
-        rdf_graph.add((patient_pid, RDF.type, FOAF.Person))
-        rdf_graph.add((patient_pid, SCHEMA.identifier, Literal(metadata['PatientID'])))
-
-    # Add modality information
-    modality_concept = mapped_data.get("ModalityConcept")
-    if modality_concept:
-        rdf_graph.add((instance_uri, DCAT.theme, modality_concept))
-        # Add labels for better visualization/querying
-        rdf_graph.add((modality_concept, RDFS.label, Literal(metadata['Modality'])))
-
-    # Add other metadata
-    rdf_graph.add((instance_uri, SCHEMA.accessionNumber, Literal(metadata['AccessionNumber'])))
-    #rdf_graph.add((instance_uri, DCTERMS.issued, Literal(metadata['StudyDate'], datatype=XSD.date)))
-    from datetime import datetime
-
-    # Convert 'YYYYMMDD' to 'YYYY-MM-DD'
-    raw_date = metadata['StudyDate']
-    try:
-        formatted_date = datetime.strptime(raw_date, '%Y%m%d').date().isoformat()
-        rdf_graph.add((instance_uri, DCTERMS.issued, Literal(formatted_date, datatype=XSD.date)))
-    except ValueError:
-        print(f"Invalid StudyDate format: {raw_date}")
-
-def process_all_dicoms(dicom_dir: str):
-    """Processes all DICOM files in a directory."""
-    for filename in os.listdir(dicom_dir):
-        if filename.endswith(".dcm"):
-            file_path = os.path.join(dicom_dir, filename)
-            metadata = extract_dicom_metadata(file_path)
-            if metadata:
-                mapped_data = map_to_ontologies(metadata)
-                generate_rdf_triples(metadata, mapped_data)
-    print(f"Processed {len(rdf_graph)} triples from DICOM files.")
-
-
-# --- Application Startup ---
-@app.on_event("startup")
-def on_startup():
-    """Initializes the application state on startup."""
-    # 1. Generate mock data
-    dicom_dir = generate_initial_dicom_files()
-    # 2. Process data and populate RDF graph
-    process_all_dicoms(dicom_dir)
-    # 3. Create HTML templates in memory (since we can't ship files easily)
-   # create_html_templates()
-
-# --- FastAPI Endpoints ---
+# Namespaces you might use (extend as needed)
+DCT = Namespace("http://purl.org/dc/terms/")
+DCAT_NS = Namespace("http://www.w3.org/ns/dcat#")
 
 @app.get("/", response_class=HTMLResponse)
-async def get_main_page(request: Request):
-    """Serves the main web interface."""
-    return templates.TemplateResponse("index.html", {"request": request, "title": "DICOM RDF Demo"})
+async def home(request: Request):
+    return templates.TemplateResponse("index.html", {"request": request, "title": "DICOM to RDF Demo", "upload_message": None})
+
+@app.post("/sparql")
+async def sparql_query(query: str = Form(...)):
+    try:
+        qres = rdf_graph.query(query)
+        results = []
+        for row in qres:
+            row_dict = {}
+            for idx, var in enumerate(qres.vars):
+                val = row[idx]
+                row_dict[str(var)] = str(val) if val is not None else None
+            results.append(row_dict)
+        return JSONResponse(content={"results": results})
+    except Exception as e:
+        return JSONResponse(content={"detail": str(e)}, status_code=400)
 
 @app.get("/catalog", response_class=HTMLResponse)
-async def get_catalog(
-    request: Request,
-    modality: str = None,
-    accession: str = None
-):
-    """
-    Serves the Health DCAT-AP compliant metadata catalog.
-    Enables dataset discovery via Modality and Accession Number.
-    """
-    query_str = """
-        SELECT ?dataset ?title ?patientId ?studyDate ?modalityLabel ?accessionNumber
-        WHERE {
-            ?dataset a <http://health.data.gov.eu/def/dcat-ap/Dataset> .
-            ?dataset <http://purl.org/dc/terms/title> ?title .
-            ?dataset <http://purl.org/dc/terms/subject> ?patient .
-            ?patient <http://schema.org/identifier> ?patientId .
-            ?dataset <http://purl.org/dc/terms/issued> ?studyDate .
-            ?dataset <http://www.w3.org/ns/dcat#theme> ?modality .
-            ?modality <http://www.w3.org/2000/01/rdf-schema#label> ?modalityLabel .
-            ?dataset <http://schema.org/accessionNumber> ?accessionNumber .
-    """
-    # Add filters for discovery
-    filters = []
-    if modality:
-        filters.append(f'FILTER(CONTAINS(LCASE(?modalityLabel), LCASE("{modality}")))')
-    if accession:
-        filters.append(f'FILTER(CONTAINS(?accessionNumber, "{accession}")))')
-    
-    if filters:
-        query_str += " ".join(filters)
-        
-    query_str += "} ORDER BY ?studyDate"
+async def catalog(request: Request, modality: str = None, accession: str = None):
+    datasets = []
+    for s in rdf_graph.subjects(RDF.type, DCAT_NS.Dataset):
+        dataset = {"id": str(s), "title": None, "patientId": None, "studyDate": None, "modality": None, "accessionNumber": None}
+        title = rdf_graph.value(s, DCT.title)
+        if title:
+            dataset["title"] = str(title)
+        patientId = rdf_graph.value(s, URIRef("http://example.org/patientId"))
+        if patientId:
+            dataset["patientId"] = str(patientId)
+        studyDate = rdf_graph.value(s, URIRef("http://example.org/studyDate"))
+        if studyDate:
+            dataset["studyDate"] = str(studyDate)
+        modalityVal = rdf_graph.value(s, URIRef("http://example.org/modality"))
+        if modalityVal:
+            dataset["modality"] = str(modalityVal)
+        accessionNum = rdf_graph.value(s, URIRef("http://example.org/accessionNumber"))
+        if accessionNum:
+            dataset["accessionNumber"] = str(accessionNum)
 
-    results = rdf_graph.query(query_str)
-    
-    datasets = [
-        {
-            "id": str(row.dataset).split('/')[-1],
-            "title": str(row.title),
-            "patientId": str(row.patientId),
-            "studyDate": str(row.studyDate),
-            "modality": str(row.modalityLabel),
-            "accessionNumber": str(row.accessionNumber)
-        } for row in results
-    ]
-    
+        if modality and modality.lower() not in (dataset["modality"] or "").lower():
+            continue
+        if accession and accession.lower() not in (dataset["accessionNumber"] or "").lower():
+            continue
+
+        datasets.append(dataset)
+
     return templates.TemplateResponse("catalog.html", {
         "request": request,
         "datasets": datasets,
         "filter_modality": modality or "",
-        "filter_accession": accession or ""
+        "filter_accession": accession or "",
+        "title": "Metadata Catalog"
     })
 
 @app.get("/visualize", response_class=HTMLResponse)
-async def get_visualization_page(request: Request):
-    """Serves the knowledge graph visualization page."""
-    return templates.TemplateResponse("visualize.html", {"request": request})
+async def visualize(request: Request):
+    return templates.TemplateResponse("graph.html", {"request": request, "title": "Knowledge Graph Visualization"})
 
 @app.get("/graph-data")
-async def get_graph_data():
-    """Provides enhanced RDF graph data with smart styling and filtering capabilities."""
+async def graph_data():
     nodes = {}
     links = []
-    
-    def get_friendly_label(uri_str):
-        """Convert URIs to human-readable labels"""
-        uri_str = str(uri_str)
-        
-        if 'patient' in uri_str.lower():
-            patient_id = uri_str.split('/')[-1]
-            return f"Patient {patient_id}"
-        
-        elif 'dataset' in uri_str and 'file_' in uri_str:
-            file_uri = URIRef(uri_str)
-            query = f"""
-            SELECT ?modalityLabel ?patientId ?studyDate WHERE {{
-                <{uri_str}> <http://www.w3.org/ns/dcat#theme> ?modality .
-                ?modality <http://www.w3.org/2000/01/rdf-schema#label> ?modalityLabel .
-                <{uri_str}> <http://purl.org/dc/terms/subject> ?patient .
-                ?patient <http://schema.org/identifier> ?patientId .
-                <{uri_str}> <http://purl.org/dc/terms/issued> ?studyDate .
-            }}
-            """
-            try:
-                results = list(rdf_graph.query(query))
-                if results:
-                    row = results[0]
-                    modality = str(row.modalityLabel)
-                    patient_id = str(row.patientId)
-                    return f"{modality} - {patient_id}"
-                else:
-                    return "DICOM Dataset"
-            except:
-                return "DICOM Dataset"
-        
-        elif 'snomed' in uri_str.lower():
-            concept_uri = URIRef(uri_str)
-            for s, p, o in rdf_graph.triples((concept_uri, RDFS.label, None)):
-                return f"{str(o)}"
-            snomed_labels = {
-                "7771000": "CT Imaging",
-                "25064002": "MR Imaging"
-            }
-            code = uri_str.split('/')[-1]
-            return snomed_labels.get(code, f"Medical Concept")
-        
-        elif 'roo' in uri_str.lower():
-            concept_uri = URIRef(uri_str)
-            for s, p, o in rdf_graph.triples((concept_uri, RDFS.label, None)):
-                return f"{str(o)}"
-            roo_labels = {
-                "ROO_00473": "RT Structure",
-                "ROO_00469": "RT Plan", 
-                "ROO_00472": "RT Dose"
-            }
-            code = uri_str.split('/')[-1]
-            return roo_labels.get(code, f"RT Concept")
-        
-        else:
-            label = uri_str.split('/')[-1].split('#')[-1]
-            label = label.replace('_', ' ').replace('-', ' ')
-            return ' '.join(word.capitalize() for word in label.split())
-    
-    def get_node_info(uri_str):
-        """Get comprehensive node information including size, group, and importance"""
-        uri_str = str(uri_str)
-        
-        if 'patient' in uri_str.lower():
-            # Count how many scans this patient has
-            patient_uri = URIRef(uri_str)
-            scan_count = len(list(rdf_graph.triples((None, DCTERMS.subject, patient_uri))))
-            return {
-                'group': 'patient',
-                'size': min(8 + scan_count * 2, 20),  # Size based on number of scans
-                'importance': scan_count,
-                'type': 'hub'
-            }
-            
-        elif 'dataset' in uri_str:
-            # Different sizes for different modalities
-            modality_sizes = {
-                'CT': 12, 'MR': 12, 'RTSTRUCT': 10, 
-                'RTPLAN': 10, 'RTDOSE': 10
-            }
-            label = get_friendly_label(uri_str)
-            for mod, size in modality_sizes.items():
-                if mod in label:
-                    return {
-                        'group': f'scan_{mod.lower()}',
-                        'size': size,
-                        'importance': 2,
-                        'type': 'data'
-                    }
-            return {'group': 'dataset', 'size': 10, 'importance': 2, 'type': 'data'}
-            
-        elif 'snomed' in uri_str.lower() or 'roo' in uri_str.lower():
-            # Count how many datasets link to this concept
-            concept_uri = URIRef(uri_str)
-            usage_count = len(list(rdf_graph.triples((None, DCAT.theme, concept_uri))))
-            return {
-                'group': 'concept',
-                'size': min(6 + usage_count, 16),
-                'importance': usage_count,
-                'type': 'concept'
-            }
-            
-        else:
-            return {'group': 'other', 'size': 8, 'importance': 1, 'type': 'other'}
 
-    def get_link_style(predicate_uri):
-        """Determine link styling based on relationship type"""
-        predicate = str(predicate_uri).split('/')[-1].split('#')[-1]
-        
-        styles = {
-            'subject': {  # about patient
-                'style': 'solid',
-                'width': 2,
-                'color': '#e74c3c',
-                'label': '',  # No label - use visual style
-                'importance': 3
-            },
-            'theme': {  # has modality
-                'style': 'dashed', 
-                'width': 1.5,
-                'color': '#3498db',
-                'label': '',
-                'importance': 2
-            },
-            'type': {  # is a
-                'style': 'dotted',
-                'width': 1,
-                'color': '#95a5a6',
-                'label': '',
-                'importance': 1
-            },
-            'identifier': {
-                'style': 'solid',
-                'width': 1,
-                'color': '#f39c12',
-                'label': '',
-                'importance': 1
-            }
-        }
-        
-        return styles.get(predicate, {
-            'style': 'solid',
-            'width': 1,
-            'color': '#bdc3c7',
-            'label': predicate.replace('_', ' '),
-            'importance': 1
-        })
+    def get_node_id(uri):
+        return str(uri)
 
-    # Process all triples to build nodes and links
     for s, p, o in rdf_graph:
-        # Add nodes for subjects and objects that are URIs
-        for item in [s, o]:
-            if isinstance(item, URIRef):
-                uri_str = str(item)
-                if uri_str not in nodes:
-                    node_info = get_node_info(uri_str)
-                    nodes[uri_str] = {
-                        "id": uri_str,
-                        "label": get_friendly_label(uri_str),
-                        "group": node_info['group'],
-                        "size": node_info['size'],
-                        "importance": node_info['importance'],
-                        "type": node_info['type']
-                    }
-        
-        # Add links between URI nodes
-        if isinstance(s, URIRef) and isinstance(o, URIRef):
-            link_style = get_link_style(p)
+        s_id = get_node_id(s)
+        o_id = get_node_id(o) if isinstance(o, (URIRef)) else None
+
+        if s_id not in nodes:
+            nodes[s_id] = {"id": s_id, "label": s_id.split("/")[-1], "group": 1}
+
+        if o_id:
+            if o_id not in nodes:
+                nodes[o_id] = {"id": o_id, "label": o_id.split("/")[-1], "group": 2}
             links.append({
-                "source": str(s),
-                "target": str(o),
-                "predicate": str(p).split('/')[-1].split('#')[-1],
-                "label": link_style['label'],
-                "style": link_style['style'],
-                "width": link_style['width'],
-                "color": link_style['color'],
-                "importance": link_style['importance']
+                "source": s_id,
+                "target": o_id,
+                "predicate": p.split("#")[-1] if "#" in p else p.split("/")[-1]
             })
 
-    # Calculate statistics
-    node_groups = {}
-    for node in nodes.values():
-        group = node['group']
-        if group not in node_groups:
-            node_groups[group] = 0
-        node_groups[group] += 1
-
-    return JSONResponse(content={
-        "nodes": list(nodes.values()), 
-        "links": links,
-        "stats": {
-            "total_nodes": len(nodes),
-            "total_links": len(links),
-            "node_groups": node_groups,
-            "patients": len([n for n in nodes.values() if n["group"] == "patient"]),
-            "scans": len([n for n in nodes.values() if n["type"] == "data"]),
-            "concepts": len([n for n in nodes.values() if n["type"] == "concept"])
-        }
-    })
-
-@app.post("/sparql")
-async def sparql_endpoint(request: Request, query: str = Form(...)):
-    """A SPARQL 1.1 compliant endpoint to query the RDF data."""
-    try:
-        # The form gives us a string, rdflib's query function handles it
-        results = rdf_graph.query(query)
-        
-        # Serialize results to JSON
-        results_json = results.serialize(format='json')
-        return JSONResponse(content=json.loads(results_json))
-    except Exception as e:
-        raise HTTPException(status_code=400, detail=f"SPARQL query failed: {e}")
-
-@app.post("/upload-dicom/", response_class=HTMLResponse)
-async def upload_dicom_file(request: Request, file: UploadFile = File(...)):
-    """Allows uploading a new DICOM file for processing."""
-    upload_dir = "dicom_uploads"
-    if not os.path.exists(upload_dir):
-        os.makedirs(upload_dir)
-        
-    file_path = os.path.join(upload_dir, file.filename)
-    
-    with open(file_path, "wb") as buffer:
-        buffer.write(await file.read())
-        
-    # Process the new file
-    metadata = extract_dicom_metadata(file_path)
-    if metadata:
-        mapped_data = map_to_ontologies(metadata)
-        generate_rdf_triples(metadata, mapped_data)
-        message = f"Successfully processed and added '{file.filename}' to the graph. Triples: {len(rdf_graph)}"
-    else:
-        message = f"Failed to process '{file.filename}'."
-        
-    return templates.TemplateResponse("index.html", {
-        "request": request,
-        "title": "DICOM RDF Demo",
-        "upload_message": message
-    })
-if __name__ == "__main__":
-    import uvicorn
-    # This part is for running directly with `python main.py`
-    # Note: Uvicorn's auto-reload works best when called from the command line.
-    print("Starting server. Run with 'uvicorn main:app --reload' for auto-reloading.")
-    uvicorn.run(app, host="127.0.0.1", port=8000)
-
+    return {"nodes": list(nodes.values()), "links": links}

@@ -39,20 +39,6 @@
                     <li>Visualizes the resulting <strong>Knowledge Graph</strong>.</li>
                 </ul>
             </div>
-
-            <div class="bg-white p-6 rounded-lg shadow-lg">
-                <h2 class="text-xl font-semibold mb-4 border-b pb-2">Upload New DICOM File</h2>
-                <p class="text-sm text-gray-600 mb-4">Extend the knowledge graph by uploading another DICOM file.</p>
-                <form action="/upload-dicom/" method="post" enctype="multipart/form-data">
-                    <input type="file" name="file" required class="block w-full text-sm text-gray-500 file:mr-4 file:py-2 file:px-4 file:rounded-full file:border-0 file:text-sm file:font-semibold file:bg-blue-50 file:text-blue-700 hover:file:bg-blue-100">
-                    <button type="submit" class="btn btn-primary mt-4">Upload and Process</button>
-                </form>
-                {% if upload_message %}
-                <div class="mt-4 p-3 bg-green-100 text-green-800 rounded-md">
-                    {{ upload_message }}
-                </div>
-                {% endif %}
-            </div>
              <div class="bg-white p-6 rounded-lg shadow-lg mt-8">
                 <h2 class="text-xl font-semibold mb-4 border-b pb-2">SPARQL Query Interface</h2>
                 <form id="sparql-form">
