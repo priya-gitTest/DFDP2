@@ -3,16 +3,19 @@ import json
 import os
 from collections import defaultdict
 from fastapi import FastAPI, UploadFile, File, HTTPException, Request
+from fastapi.responses import Response
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, HTMLResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from pydantic import BaseModel
-from rdflib import Graph, URIRef
+from rdflib import Graph, URIRef,BNode, Namespace
 from io import BytesIO
+
 
 # Define the file name for the RDF data
 TURTLE_FILE_NAME = "dicom_mapped_with_catalog.ttl"
+DCAT = Namespace("http://www.w3.org/ns/dcat#")
 
 # Initialize an in-memory RDF graph
 g = Graph()
@@ -68,6 +71,44 @@ class CatalogItem(BaseModel):
 class Catalog(BaseModel):
     metadata: CatalogMetadata
     datasets: list[CatalogItem]
+
+@app.get("/rdf/{catalog_name}", response_class=Response)
+async def download_catalog_rdf_file(catalog_name: str):
+    """
+    Constructs a subgraph for a specific catalog and returns it as a downloadable Turtle file.
+    """
+    result_graph = Graph()
+    
+    # **MODIFICATION**: Correctly iterate over the namespaces
+    for prefix, namespace in g.namespaces():
+        result_graph.bind(prefix, namespace)
+
+    catalog_uri = URIRef(f"http://example.org/catalog/{catalog_name}")
+
+    if (catalog_uri, None, None) not in g:
+        raise HTTPException(status_code=404, detail=f"Catalog '{catalog_name}' not found.")
+
+    for s, p, o in g.triples((catalog_uri, None, None)):
+        result_graph.add((s, p, o))
+        
+        if p == DCAT.dataset:
+            dataset_uri = o
+            for s_ds, p_ds, o_ds in g.triples((dataset_uri, None, None)):
+                result_graph.add((s_ds, p_ds, o_ds))
+
+                if p_ds == DCAT.distribution:
+                    dist_uri = o_ds
+                    if not isinstance(dist_uri, BNode):
+                        for s_dist, p_dist, o_dist in g.triples((dist_uri, None, None)):
+                            result_graph.add((s_dist, p_dist, o_dist))
+
+    ttl_data = result_graph.serialize(format="turtle")
+    
+    headers = {
+        'Content-Disposition': f'attachment; filename="{catalog_name}.ttl"'
+    }
+    
+    return Response(content=ttl_data, media_type="text/turtle", headers=headers)
 
 @app.get("/", response_class=HTMLResponse)
 async def root(request: Request):

@@ -80,7 +80,16 @@ def element_to_dict(elem):
     0x00189310,  # Table Feed per Rotation
     0x00189311,  # Spiral Pitch Factor
     0x00321030,  # Reason for Study
-    0x00324000,  # Study Comments
+    0x00324000,  # Study Comments,
+    0x00100010, 0x00100020, 0x00100040, 0x00101010, 0x00102160, 0x00104000, 0x001021B0,
+        0x0020000D, 0x00080020, 0x00080030, 0x00080050, 0x00081030, 0x00081040, 0x00080080,
+        0x00080060, 0x00080070, 0x00081090, 0x0020000E, 0x00080021, 0x00080031, 0x00200011,
+        0x0008103E, 0x00080018, 0x00200013, 0x00080022, 0x00080032, 0x00200032, 0x00200037,
+        0x00280010, 0x00280011, 0x00180010, 0x00180015, 0x00180022, 0x00180050, 0x00180060,
+        0x00180090, 0x00181020, 0x00181030, 0x00181040, 0x00181100, 0x00181110, 0x00181111,
+        0x00181120, 0x00181130, 0x00181140, 0x00181150, 0x00181151, 0x00181152, 0x00181160,
+        0x00181170, 0x00181190, 0x00181210, 0x00185100, 0x00189305, 0x00189306, 0x00189307,
+        0x00189309, 0x00189310, 0x00189311, 0x00321030, 0x00324000
 }
 
     if elem.tag not in include_tags:
@@ -124,7 +133,7 @@ def dataset_to_list(ds):
 
 def process_dicom_file(filepath):
     try:
-        ds = pydicom.dcmread(filepath, stop_before_pixels=False, force=True)
+        ds = pydicom.dcmread(filepath, stop_before_pixels=True, force=True)#Changed stop_before_pixels to True for much faster processing.
         return {
             "FilePath": str(filepath),
             "FileMeta": dataset_to_list(ds.file_meta),
@@ -145,4 +154,5 @@ def process_dicom_folder(folder_path, output_json):
     print(f"✅ Metadata saved to {output_json}")
 
 # Example run:
-process_dicom_folder(Path(DATA_DIR), "dicom_metadata.json")
+if __name__ == "__main__":
+    process_dicom_folder(DATA_DIR, "dicom_metadata.json")

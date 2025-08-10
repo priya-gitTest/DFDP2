@@ -1,7 +1,8 @@
 import json
 from rdflib import Graph, Namespace, URIRef, Literal
-from rdflib.namespace import RDF, RDFS, XSD, DC, FOAF
+from rdflib.namespace import RDF, RDFS, XSD, DC, FOAF, DCAT
 import os
+from collections import defaultdict
 
 # --- [Namespaces and Mappings remain the same] ---
 # Namespaces
@@ -100,88 +101,81 @@ def parse_value(value, vr):
 
 def json_to_rdf_multiple_catalogs(json_file, output_file):
     g = Graph()
-
-    # --- [Bind namespaces - same as before] ---
-    g.bind("dcterms", DCTERMS)
     g.bind("dcat", DCAT)
+    g.bind("dcterms", DCTERMS)
     g.bind("dicom", DICOM)
-    g.bind("foaf", FOAF_NS)
+    g.bind("foaf", FOAF)
     g.bind("roo", ROO)
     g.bind("snomed", SNOMED)
+    # ... bind other namespaces if you have them ...
 
     with open(json_file) as f:
         data = json.load(f)
 
-    # **MODIFICATION**: Pre-process the flat list to group files by catalog
-    catalogs = {}
+    # --- Pre-processing Logic ---
+    catalogs = defaultdict(lambda: defaultdict(list))
     for item in data:
         file_path = item.get("FilePath", "")
-        # Normalize path separators for consistency
         path_parts = file_path.replace("\\", "/").split('/')
-        if len(path_parts) > 1:
-            catalog_name = path_parts[1]  # Assumes catalog name is the second part
-            if catalog_name not in catalogs:
-                catalogs[catalog_name] = []
-            catalogs[catalog_name].append(item)
-
-    # **MODIFICATION**: Loop through each pre-processed catalog
-    for catalog_name, catalog_data in catalogs.items():
         
-        catalog_uri = URIRef(f"http://example.org/catalog/{catalog_name}")
-        dataset_uri = URIRef(f"http://example.org/dataset/{catalog_name}")
+        if len(path_parts) > 1:
+            catalog_name = path_parts[1]
+            study_uid = "unknown_study"
+            for elem in item.get("Dataset", []):
+                if elem.get("Name") == "Study Instance UID":
+                    study_uid = elem.get("Value")
+                    break
+            catalogs[catalog_name][study_uid].append(item)
 
+    # --- RDF Generation Logic ---
+    for catalog_name, studies in catalogs.items():
+        catalog_uri = URIRef(f"http://example.org/catalog/{catalog_name}")
         g.add((catalog_uri, RDF.type, DCAT.Catalog))
         g.add((catalog_uri, DCTERMS.title, Literal(f"DICOM Collection: {catalog_name}")))
-        g.add((catalog_uri, DCAT.dataset, dataset_uri))
-        g.add((catalog_uri, DCTERMS.publisher, Literal("Priyanka Test Catalog Publisher")))
-        g.add((catalog_uri, DCTERMS.language, Literal("en"))) # Example value for English
-        g.add((catalog_uri, DCTERMS.issued, Literal("2025-08-10", datatype=XSD.date))) # Example value for today's date
+        g.add((catalog_uri, DCTERMS.publisher, Literal("Priyanka Demo Catalog Publisher Name")))
+        g.add((catalog_uri, DCTERMS.issued, Literal("2025-08-10", datatype=XSD.date)))
+        g.add((catalog_uri, DCTERMS.language, Literal("en")))
 
+        for study_uid, files_in_study in studies.items():
+            dataset_uri = URIRef(f"http://example.org/dataset/{study_uid}")
+            g.add((catalog_uri, DCAT.dataset, dataset_uri))
 
-        g.add((dataset_uri, RDF.type, DCAT.Dataset))
-        g.add((dataset_uri, DCTERMS.title, Literal(f"DICOM Files for {catalog_name}")))
-        g.add((dataset_uri, DCTERMS.description, Literal(f"A dataset containing all DICOM metadata for catalog {catalog_name}.")))
-        
-        # Use the Study Instance UID from the first file as a general identifier for the dataset
-        if catalog_data:
-            first_file_dataset = catalog_data[0].get("Dataset", [])
-            study_uid = next((elem.get("Value") for elem in first_file_dataset if elem.get("Name") == "Study Instance UID"), None)
-            if study_uid:
-                g.add((dataset_uri, DCTERMS.identifier, Literal(study_uid)))
+            g.add((dataset_uri, RDF.type, DCAT.Dataset))
+            g.add((dataset_uri, DCTERMS.identifier, Literal(study_uid)))
 
-        for item in catalog_data:
-            file_path = item.get("FilePath")
-            dataset_tags = item.get("Dataset", [])
-            
-            # Use a clean, unique filename for the subject URI
-            subject_id = os.path.basename(file_path)
-            subject = URIRef(f"http://example.org/dicom/{catalog_name}_{subject_id}")
+            if files_in_study:
+                first_file_ds = files_in_study[0].get("Dataset", [])
+                study_desc = next((e.get("Value") for e in first_file_ds if e.get("Name") == "Study Description"), f"Study {study_uid}")
+                g.add((dataset_uri, DCTERMS.title, Literal(study_desc)))
 
-            g.add((dataset_uri, DCAT.distribution, subject))
-            g.add((subject, RDF.type, DCAT.Distribution))
-            g.add((subject, DCTERMS.title, Literal(subject_id)))
-            g.add((subject, DCAT.mediaType, Literal("application/dicom")))
+            for item in files_in_study:
+                file_path = item.get("FilePath")
+                dataset_tags = item.get("Dataset", [])
+                
+                # **MODIFICATION**: Create a unique ID from the full path
+                # This prevents filename collisions between different subfolders.
+                unique_file_id = file_path.replace('/', '_').replace('\\', '_')
+                subject_uri = URIRef(f"http://example.org/dicom/{unique_file_id}")
 
-            for elem in dataset_tags:
-                name = elem.get("Name")
-                vr = elem.get("VR")
-                value = elem.get("Value")
+                g.add((dataset_uri, DCAT.distribution, subject_uri))
+                g.add((subject_uri, RDF.type, DCAT.Distribution))
+                g.add((subject_uri, DCTERMS.title, Literal(os.path.basename(file_path))))
+                g.add((subject_uri, DCAT.mediaType, Literal("application/dicom")))
 
-                if name in mapping and value is not None:
-                    props = mapping[name]
-                    for prop in props:
-                        if prop == ROO.hasAnatomicSite and isinstance(value, str):
-                            snomed_uri = snomed_mapping.get(value.upper())
-                            g.add((subject, prop, snomed_uri if snomed_uri else Literal(value)))
-                        else:
+                for elem in dataset_tags:
+                    name, vr, value = elem.get("Name"), elem.get("VR"), elem.get("Value")
+                    if name in mapping and value is not None:
+                        props = mapping[name]
+                        for prop in props:
                             lit = parse_value(value, vr)
-                            if lit is not None:
-                                g.add((subject, prop, lit))
-
+                            if lit:
+                                g.add((subject_uri, prop, lit))
+                                
     g.serialize(destination=output_file, format="turtle")
+
 
 if __name__ == "__main__":
     json_file = "dicom_metadata.json"
     output_file = "dicom_mapped_with_catalog.ttl"
     json_to_rdf_multiple_catalogs(json_file, output_file)
-    print(f"RDF mapping with multiple DCAT catalogs written to {output_file}")
+    print(f"RDF mapping written to {output_file}")
