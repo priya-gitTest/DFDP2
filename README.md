@@ -49,14 +49,15 @@ Built with **Python**, the app uses:
 
 
 ```bash
-pip install fastapi uvicorn "pydantic[email]" pydicom rdflib requests python-multipart jinja2
+pip install "fastapi[all]" uvicorn  pydicom rdflib requests "python-multipart" Jinja2
 ```
 
 ## ▶️ Running the Application
 
 ```bash
 #Load the Dicom iamges from Hugging Face Repository and convert them to DICOM files:
-python fetch_dicom.py 
+python fetch_dicom.py # Generates dicom_metadata.json
+python map_dicom_complete.py # Generates dicom_mapped_with_catalog.ttl
 # then start the FAST API App.
 uvicorn main:app --reload
 ```
@@ -99,36 +100,79 @@ INFO:     Application startup complete.
 Query all DICOM datasets where the modality is **CT**:
 
 ```sparql
-PREFIX dcterms: <http://purl.org/dc/terms/>
-PREFIX schema: <http://schema.org/>
+#Query 1
 PREFIX dcat: <http://www.w3.org/ns/dcat#>
-PREFIX rdfs: <http://www.w3.org/2000/01/rdf-schema#>
+PREFIX dcterms: <http://purl.org/dc/terms/>
+PREFIX dicom: <http://dicom.nema.org/resources/ontology/DCM#>
 
-SELECT ?dataset ?title ?patientId ?studyDate ?accessionNumber
+SELECT ?file ?patientId ?studyDate ?modality ?accessionNumber
 WHERE {
-  ?dataset a <http://health.data.gov.eu/def/dcat-ap/Dataset> .
-  ?dataset dcterms:title ?title .
-  ?dataset dcterms:subject ?patient .
-  ?patient schema:identifier ?patientId .
-  ?dataset dcterms:issued ?studyDate .
-  ?dataset dcat:theme ?modality .
-  ?modality rdfs:label "CT" .
-  ?dataset schema:accessionNumber ?accessionNumber .
+  ?dataset a dcat:Dataset ;
+           dcat:distribution ?file .
+  
+  ?file dicom:PatientID ?patientId ;
+        dicom:SeriesDate ?studyDate ;
+        dicom:Modality ?modality ;
+        dicom:AccessionNumber ?accessionNumber .
 }
 ORDER BY ?studyDate
+LIMIT 10
+
+#Query 2 : 
+PREFIX dicom: <http://dicom.nema.org/resources/ontology/DCM#>
+
+SELECT DISTINCT ?patientId
+WHERE {
+  ?subject dicom:Manufacturer "GE MEDICAL SYSTEMS" .
+  ?subject dicom:PatientID ?patientId .
+}
+
+#Query 3
+PREFIX dicom: <http://dicom.nema.org/resources/ontology/DCM#>
+
+SELECT DISTINCT ?manufacturer ?modelName
+WHERE {
+  ?file dicom:Manufacturer ?manufacturer .
+  ?file dicom:ManufacturerModelName ?modelName .
+}
+ORDER BY ?manufacturer ?modelName
+#Query 4
+PREFIX dicom: <http://dicom.nema.org/resources/ontology/DCM#>
+PREFIX roo: <http://www.cancerdata.org/roo/>
+
+SELECT DISTINCT ?patientId ?bodyPart ?age ?sex ?reasonForStudy
+WHERE {
+  ?subject dicom:PatientID ?patientId .
+  ?subject dicom:BodyPartExamined ?bodyPart .
+
+  OPTIONAL { ?subject roo:hasAge ?age . }
+  OPTIONAL { ?subject roo:hasSex ?sex . }
+  OPTIONAL { ?subject roo:hasReasonForStudy ?reasonForStudy . }
+}
+#Query 5
+PREFIX dicom: <http://dicom.nema.org/resources/ontology/DCM#>
+PREFIX dcat: <http://www.w3.org/ns/dcat#>
+
+SELECT ?patientId (COUNT(?file) AS ?numberOfScans)
+WHERE {
+  ?dataset a dcat:Dataset ;
+           dcat:distribution ?file .
+  ?file dicom:PatientID ?patientId .
+}
+GROUP BY ?patientId
+ORDER BY ?patientId
 ```
 
 ## 📚 Ontologies Used
 
-| Prefix    | URI                                             |
-|-----------|--------------------------------------------------|
-| `ROO`     | https://www.cancerdata.org/roo-information       |
-| `SNOMED`  | https://bioportal.bioontology.org/ontologies/SNOMEDCT|
-| `DCAT`    | http://www.w3.org/ns/dcat#                      |
-| `HDCAT`   | https://healthdcat-ap.github.io/        |
-| `SCHEMA`  | http://schema.org/                              |
-| `FOAF`    | http://xmlns.com/foaf/0.1/                      |
-| `DCTERMS` | http://purl.org/dc/terms/                       |
+| Prefix    | URI                                                   |
+|-----------|-------------------------------------------------------|
+| `ROO`     | https://www.cancerdata.org/roo-information            |
+| `SNOMED`  | https://bioportal.bioontology.org/ontologies/SNOMEDCT |
+| `DCAT`    | http://www.w3.org/ns/dcat#                            |
+| `FOAF`    | http://xmlns.com/foaf/0.1/                            |
+| `dicom`   | http://dicom.nema.org/resources/ontology/DCM          |
+| `DCTERMS` | http://purl.org/dc/terms/                             |
 ---
 
 ## 📁 Directory Structure
@@ -139,7 +183,6 @@ ORDER BY ?studyDate
 ├── templates/          # HTML templates (auto-generated)
 ├── static/             # Static assets (CSS/JS)
 ├── dicom_files/        # DICOMs downloaded via Script
-├── dicom_uploads/      # Uploaded DICOMs via Web Interface
 ```
 ---
 

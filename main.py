@@ -1,107 +1,143 @@
-from fastapi import FastAPI, Request, Form
-from fastapi.responses import HTMLResponse, JSONResponse
-from fastapi.templating import Jinja2Templates
-from rdflib import Graph, URIRef, Namespace
-from rdflib.namespace import RDF, DCAT
+# main.py
+import json
 import os
+from fastapi import FastAPI, UploadFile, File, HTTPException, Request
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse, HTMLResponse
+from fastapi.staticfiles import StaticFiles
+from fastapi.templating import Jinja2Templates
+from pydantic import BaseModel
+from rdflib import Graph, URIRef
+from io import BytesIO
 
-app = FastAPI()
+# Define the file name for the RDF data
+TURTLE_FILE_NAME = "dicom_mapped_with_catalog.ttl"
+
+# Initialize an in-memory RDF graph
+g = Graph()
+
+# Attempt to load the Turtle file into the graph
+try:
+    if os.path.exists(TURTLE_FILE_NAME):
+        g.parse(TURTLE_FILE_NAME, format="turtle")
+        print(f"Successfully loaded {len(g)} triples from {TURTLE_FILE_NAME}")
+    else:
+        print(f"Warning: {TURTLE_FILE_NAME} not found. The graph is empty.")
+except Exception as e:
+    print(f"Error loading RDF file: {e}")
+
+# Initialize FastAPI application
+app = FastAPI(title="DICOM RDF Knowledge Graph API")
+
+# Mount the static directory
+app.mount("/static", StaticFiles(directory="static"), name="static")
+
+# Configure templates
 templates = Jinja2Templates(directory="templates")
 
-DATA_FILE = "dicom_mapped_with_catalog.ttl"
+# Allow CORS for the frontend
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],  # Adjust this to your frontend URL in production
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
-# Load RDF graph once at startup
-rdf_graph = Graph()
-if os.path.exists(DATA_FILE):
-    rdf_graph.parse(DATA_FILE, format="turtle")
-else:
-    print(f"Warning: RDF data file {DATA_FILE} not found.")
+class SPARQLQuery(BaseModel):
+    query: str
 
-# Namespaces you might use (extend as needed)
-DCT = Namespace("http://purl.org/dc/terms/")
-DCAT_NS = Namespace("http://www.w3.org/ns/dcat#")
+class CatalogItem(BaseModel):
+    uri: str
+    title: str
+    description: str
 
 @app.get("/", response_class=HTMLResponse)
-async def home(request: Request):
-    return templates.TemplateResponse("index.html", {"request": request, "title": "DICOM to RDF Demo", "upload_message": None})
-
-@app.post("/sparql")
-async def sparql_query(query: str = Form(...)):
-    try:
-        qres = rdf_graph.query(query)
-        results = []
-        for row in qres:
-            row_dict = {}
-            for idx, var in enumerate(qres.vars):
-                val = row[idx]
-                row_dict[str(var)] = str(val) if val is not None else None
-            results.append(row_dict)
-        return JSONResponse(content={"results": results})
-    except Exception as e:
-        return JSONResponse(content={"detail": str(e)}, status_code=400)
+async def root(request: Request):
+    return templates.TemplateResponse("index.html", {"request": request})
 
 @app.get("/catalog", response_class=HTMLResponse)
-async def catalog(request: Request, modality: str = None, accession: str = None):
-    datasets = []
-    for s in rdf_graph.subjects(RDF.type, DCAT_NS.Dataset):
-        dataset = {"id": str(s), "title": None, "patientId": None, "studyDate": None, "modality": None, "accessionNumber": None}
-        title = rdf_graph.value(s, DCT.title)
-        if title:
-            dataset["title"] = str(title)
-        patientId = rdf_graph.value(s, URIRef("http://example.org/patientId"))
-        if patientId:
-            dataset["patientId"] = str(patientId)
-        studyDate = rdf_graph.value(s, URIRef("http://example.org/studyDate"))
-        if studyDate:
-            dataset["studyDate"] = str(studyDate)
-        modalityVal = rdf_graph.value(s, URIRef("http://example.org/modality"))
-        if modalityVal:
-            dataset["modality"] = str(modalityVal)
-        accessionNum = rdf_graph.value(s, URIRef("http://example.org/accessionNumber"))
-        if accessionNum:
-            dataset["accessionNumber"] = str(accessionNum)
-
-        if modality and modality.lower() not in (dataset["modality"] or "").lower():
-            continue
-        if accession and accession.lower() not in (dataset["accessionNumber"] or "").lower():
-            continue
-
-        datasets.append(dataset)
-
-    return templates.TemplateResponse("catalog.html", {
-        "request": request,
-        "datasets": datasets,
-        "filter_modality": modality or "",
-        "filter_accession": accession or "",
-        "title": "Metadata Catalog"
-    })
+async def get_catalog_page(request: Request):
+    return templates.TemplateResponse("catalog.html", {"request": request})
 
 @app.get("/visualize", response_class=HTMLResponse)
-async def visualize(request: Request):
-    return templates.TemplateResponse("graph.html", {"request": request, "title": "Knowledge Graph Visualization"})
+async def get_visualize_page(request: Request):
+    return templates.TemplateResponse("visualize.html", {"request": request})
 
-@app.get("/graph-data")
-async def graph_data():
+@app.get("/sparql", response_class=HTMLResponse)
+async def get_sparql_page(request: Request):
+    """
+    Serves the HTML template for the SPARQL query interface.
+    """
+    return templates.TemplateResponse("sparql.html", {"request": request})
+
+@app.post("/sparql")
+async def sparql_query_endpoint(sparql_query: SPARQLQuery):
+    """
+    Executes a SPARQL query against the in-memory graph.
+    """
+    try:
+        qres = g.query(sparql_query.query)
+        results = [row.asdict() for row in qres]
+        
+        # Convert URIRef objects to strings for JSON serialization
+        for result in results:
+            for key, value in result.items():
+                if isinstance(value, URIRef):
+                    result[key] = str(value)
+
+        return JSONResponse(content={"results": results})
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"Error executing SPARQL query: {e}")
+
+@app.get("/api/catalog")
+async def get_catalog_datasets_api():
+    """
+    Retrieves a list of datasets from the catalog.
+    """
+    query = """
+    PREFIX dcat: <http://www.w3.org/ns/dcat#>
+    PREFIX dcterms: <http://purl.org/dc/terms/>
+    SELECT ?dataset ?title ?description
+    WHERE {
+      ?catalog a dcat:Catalog ;
+               dcat:dataset ?dataset .
+      ?dataset dcterms:title ?title ;
+               dcterms:description ?description .
+    }
+    """
+    try:
+        qres = g.query(query)
+        catalog_items = []
+        for row in qres:
+            catalog_items.append(
+                CatalogItem(
+                    uri=str(row.dataset),
+                    title=str(row.title),
+                    description=str(row.description)
+                ).dict()
+            )
+        return {"datasets": catalog_items}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error querying catalog: {e}")
+
+@app.get("/api/visualize")
+async def get_graph_data_for_visualization_api():
+    """
+    Extracts nodes and links from the graph for D3.js visualization.
+    This is a simplified approach to demonstrate the concept.
+    """
     nodes = {}
     links = []
 
-    def get_node_id(uri):
-        return str(uri)
+    for s, p, o in g:
+        # Add subject and object as nodes
+        if s not in nodes:
+            nodes[s] = {"id": str(s), "group": 1}
+        if o not in nodes:
+            nodes[o] = {"id": str(o), "group": 2}
 
-    for s, p, o in rdf_graph:
-        s_id = get_node_id(s)
-        o_id = get_node_id(o) if isinstance(o, (URIRef)) else None
-
-        if s_id not in nodes:
-            nodes[s_id] = {"id": s_id, "label": s_id.split("/")[-1], "group": 1}
-
-        if o_id:
-            if o_id not in nodes:
-                nodes[o_id] = {"id": o_id, "label": o_id.split("/")[-1], "group": 2}
-            links.append({
-                "source": s_id,
-                "target": o_id,
-                "predicate": p.split("#")[-1] if "#" in p else p.split("/")[-1]
-            })
+        # Add the triple as a link
+        links.append({"source": str(s), "target": str(o), "label": str(p)})
 
     return {"nodes": list(nodes.values()), "links": links}

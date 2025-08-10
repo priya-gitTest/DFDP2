@@ -1,72 +1,50 @@
-<!DOCTYPE html>
-    <html lang="en">
-    <head>
-        <meta charset="UTF-8">
-        <meta name="viewport" content="width=device-width, initial-scale=1.0">
-        <title>Metadata Catalog</title>
-        <script src="https://cdn.tailwindcss.com"></script>
-        <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
-        <style>
-            body { font-family: 'Inter', sans-serif; }
-            .header { background-color: #1a2b47; }
-            .btn { @apply px-4 py-2 rounded-md font-semibold text-white transition-colors; }
-            .btn-secondary { @apply bg-gray-600 hover:bg-gray-700; }
-            .dataset-card { @apply bg-white rounded-lg shadow-md p-4 border-l-4 border-blue-500; }
-        </style>
-    </head>
-    <body class="bg-gray-100 text-gray-800">
-        <header class="header text-white p-4 shadow-md">
-            <div class="container mx-auto flex justify-between items-center">
-                <h1 class="text-2xl font-bold">Metadata Catalog (Health DCAT-AP)</h1>
-                 <nav>
-                    <a href="/" class="btn btn-secondary">Home</a>
-                    <a href="/catalog" class="btn btn-secondary">Metadata Catalog</a>
-                    <a href="/visualize" class="btn btn-secondary">Visualize Graph</a>
-                </nav>
-            </div>
-        </header>
+{% extends "base.html" %}
 
-        <main class="container mx-auto p-8">
-            <!-- Discovery/Filter Form -->
-            <div class="bg-white p-6 rounded-lg shadow-lg mb-8">
-                <h2 class="text-xl font-semibold mb-4">Discover Datasets</h2>
-                <form action="/catalog" method="get" class="grid grid-cols-1 md:grid-cols-3 gap-4 items-end">
-                    <div>
-                        <label for="modality" class="block text-sm font-medium text-gray-700">Modality</label>
-                        <input type="text" name="modality" id="modality" value="{{ filter_modality }}" class="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 sm:text-sm">
-                    </div>
-                    <div>
-                        <label for="accession" class="block text-sm font-medium text-gray-700">Accession Number</label>
-                        <input type="text" name="accession" id="accession" value="{{ filter_accession }}" class="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 sm:text-sm">
-                    </div>
-                    <div class="flex space-x-2">
-                        <button type="submit" class="w-full bg-blue-600 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded">Search</button>
-                        <a href="/catalog" class="w-full text-center bg-gray-500 hover:bg-gray-600 text-white font-bold py-2 px-4 rounded">Reset</a>
-                    </div>
-                </form>
-            </div>
+{% block content %}
+<div class="flex flex-col items-center justify-center text-center">
+    <h1 class="text-4xl font-bold text-gray-900 mb-6">Processed Datasets Catalog</h1>
+    <p class="text-lg text-gray-600 max-w-2xl mb-8">
+        Browse the list of DICOM datasets available in the knowledge graph.
+    </p>
+    <div id="catalog-list" class="w-full max-w-4xl space-y-4">
+        <p id="loading-message" class="text-center text-gray-500">Loading catalog...</p>
+    </div>
+</div>
 
-            <!-- Datasets Listing -->
-            <div class="space-y-4">
-                {% if datasets %}
-                    {% for dataset in datasets %}
-                    <div class="dataset-card">
-                        <h3 class="text-lg font-semibold text-blue-800">{{ dataset.title }}</h3>
-                        <p class="text-sm text-gray-600">ID: {{ dataset.id }}</p>
-                        <div class="mt-2 grid grid-cols-2 md:grid-cols-4 gap-2 text-sm">
-                            <div><strong>Patient ID:</strong> <span class="font-mono">{{ dataset.patientId }}</span></div>
-                            <div><strong>Study Date:</strong> {{ dataset.studyDate }}</div>
-                            <div><strong>Modality:</strong> <span class="bg-blue-100 text-blue-800 px-2 py-1 rounded-full">{{ dataset.modality }}</span></div>
-                            <div><strong>Accession #:</strong> <span class="font-mono">{{ dataset.accessionNumber }}</span></div>
-                        </div>
-                    </div>
-                    {% endfor %}
-                {% else %}
-                    <div class="dataset-card border-l-yellow-500">
-                        <p>No datasets found matching your criteria. Try resetting the filters.</p>
-                    </div>
-                {% endif %}
-            </div>
-        </main>
-    </body>
-    </html>
+<script>
+    document.addEventListener('DOMContentLoaded', async () => {
+        const catalogList = document.getElementById('catalog-list');
+        const loadingMessage = document.getElementById('loading-message');
+
+        try {
+            const response = await fetch('/api/catalog');
+            if (!response.ok) {
+                throw new Error('Failed to fetch catalog data');
+            }
+            const data = await response.json();
+            
+            loadingMessage.classList.add('hidden');
+
+            if (data.datasets.length > 0) {
+                data.datasets.forEach(dataset => {
+                    const card = document.createElement('div');
+                    card.className = 'bg-white p-6 rounded-lg shadow-md hover:shadow-lg transition duration-300';
+                    card.innerHTML = `
+                        <h2 class="text-2xl font-semibold text-indigo-600 mb-2">${dataset.title}</h2>
+                        <p class="text-gray-700">${dataset.description}</p>
+                        <a href="#" class="text-indigo-500 hover:text-indigo-700 font-medium mt-2 block">View Details &rarr;</a>
+                    `;
+                    catalogList.appendChild(card);
+                });
+            } else {
+                catalogList.innerHTML = '<p class="text-center text-gray-500">No datasets found in the catalog.</p>';
+            }
+
+        } catch (error) {
+            console.error('Error fetching catalog:', error);
+            loadingMessage.textContent = 'Failed to load catalog. Please try again later.';
+            loadingMessage.classList.remove('hidden');
+        }
+    });
+</script>
+{% endblock %}

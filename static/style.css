@@ -1,0 +1,9 @@
+/* static/style.css */
+body {
+    font-family: 'Inter', sans-serif;
+}
+
+#graph-container {
+    background-color: #f7fafc;
+    border-radius: 0.5rem;
+}
