@@ -114,101 +114,91 @@ async def get_catalog_datasets_api():
     """
     Retrieves a list of all catalogs, each containing its metadata and datasets.
     """
+    # **MODIFICATION**: Added ?datasetIssued to the SELECT and WHERE clauses.
     query = """
     PREFIX dcat: <http://www.w3.org/ns/dcat#>
     PREFIX dcterms: <http://purl.org/dc/terms/>
     PREFIX foaf: <http://xmlns.com/foaf/0.1/>
-    PREFIX custom_dicom: <http://example.org/dicom/private#>
 
-    SELECT ?catalog ?catalogPublisher ?catalogIssued ?dataset ?datasetTitle ?datasetDescription ?datasetCreator ?datasetIssued ?datasetPublisher ?datasetIdentifier ?distribution ?conformsTo ?language ?name
+    SELECT 
+      ?catalog 
+      ?catalogTitle
+      ?catalogPublisher
+      ?catalogIssued
+      ?catalogLanguage
+      ?dataset 
+      ?datasetTitle 
+      ?datasetDescription
+      ?datasetIdentifier
+      ?datasetIssued
+      (COUNT(?distribution) AS ?numRecords)
     WHERE {
       ?catalog a dcat:Catalog .
+      ?catalog dcat:dataset ?dataset .
+      ?dataset dcat:distribution ?distribution .
+
+      OPTIONAL { ?catalog dcterms:title ?catalogTitle . }
       OPTIONAL { ?catalog dcterms:publisher ?catalogPublisher . }
       OPTIONAL { ?catalog dcterms:issued ?catalogIssued . }
-      OPTIONAL { ?catalog dcterms:conformsTo ?conformsTo . }
-      OPTIONAL { ?catalog dcterms:language ?language . }
-      OPTIONAL { ?catalog custom_dicom:collectionName ?name . }
-      OPTIONAL { ?catalog dcat:dataset ?dataset .
-                 OPTIONAL { ?dataset dcterms:title ?datasetTitle . }
-                 OPTIONAL { ?dataset dcterms:description ?datasetDescription . }
-                 OPTIONAL { ?dataset dcterms:creator ?datasetCreator . }
-                 OPTIONAL { ?dataset dcterms:issued ?datasetIssued . }
-                 OPTIONAL { ?dataset dcterms:publisher ?datasetPublisher . }
-                 OPTIONAL { ?dataset dcterms:identifier ?datasetIdentifier . }
-                 OPTIONAL { ?dataset dcat:distribution ?distribution . }
-               }
+      OPTIONAL { ?catalog dcterms:language ?catalogLanguage . }
+      OPTIONAL { ?dataset dcterms:title ?datasetTitle . }
+      OPTIONAL { ?dataset dcterms:description ?datasetDescription . }
+      OPTIONAL { ?dataset dcterms:identifier ?datasetIdentifier . }
+      OPTIONAL { ?dataset dcterms:issued ?datasetIssued . }
     }
+    GROUP BY ?catalog ?catalogTitle ?catalogPublisher ?catalogIssued ?catalogLanguage ?dataset ?datasetTitle ?datasetDescription ?datasetIdentifier ?datasetIssued
+    ORDER BY ?catalogTitle ?datasetTitle
     """
     
-    qres = g.query(query)
-    
+    try:
+        qres = g.query(query)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"SPARQL query failed: {e}")
+
     catalogs_data = defaultdict(lambda: {
-        "metadata": {
-            "conformsTo": "N/A", "publisher": "N/A", "language": "N/A", "issued": "N/A", "name": "N/A"
-        },
-        "datasets": defaultdict(lambda: {
-            "title": "N/A", "description": "N/A", "numRecords": 0, "publisher": "N/A",
-            "issued": "N/A", "identifier": "N/A", "creators": set()
-        })
+        "metadata": None,
+        "datasets": []
     })
 
     for row in qres:
         catalog_uri = str(row.catalog)
         
-        # Process catalog metadata
-        if row.conformsTo:
-            catalogs_data[catalog_uri]["metadata"]["conformsTo"] = str(row.conformsTo)
-        if row.catalogPublisher:
-            catalogs_data[catalog_uri]["metadata"]["publisher"] = str(row.catalogPublisher)
-        if row.language:
-            catalogs_data[catalog_uri]["metadata"]["language"] = str(row.language)
-        if row.catalogIssued:
-            catalogs_data[catalog_uri]["metadata"]["issued"] = str(row.catalogIssued)
-        if row.name:
-            catalogs_data[catalog_uri]["metadata"]["name"] = str(row.name)
+        if catalogs_data[catalog_uri]["metadata"] is None:
+             catalogs_data[catalog_uri]["metadata"] = CatalogMetadata(
+                publisher=str(row.catalogPublisher) if row.catalogPublisher else None,
+                name=str(row.catalogTitle) if row.catalogTitle else "Untitled Catalog",
+                language=str(row.catalogLanguage) if row.catalogLanguage else None,
+                issued=str(row.catalogIssued) if row.catalogIssued else None,
+                conformsTo=None
+             )
 
-        # Process dataset data, only if a dataset is present in the row
-        if row.dataset:
-            dataset_uri = str(row.dataset)
-            dataset = catalogs_data[catalog_uri]["datasets"][dataset_uri]
-            
-            dataset["title"] = str(row.datasetTitle) if row.datasetTitle else dataset["title"]
-            dataset["description"] = str(row.datasetDescription) if row.datasetDescription else dataset["description"]
-            if row.distribution:
-                dataset["numRecords"] += 1
-            if row.datasetPublisher:
-                dataset["publisher"] = str(row.datasetPublisher)
-            if row.datasetIssued:
-                dataset["issued"] = str(row.datasetIssued)
-            if row.datasetIdentifier:
-                dataset["identifier"] = str(row.datasetIdentifier)
-            if row.datasetCreator:
-                dataset["creators"].add(str(row.datasetCreator))
-    
-    result_catalogs = []
-    for catalog_uri, data in catalogs_data.items():
-        datasets_list = []
-        for dataset_uri, dataset_data in data["datasets"].items():
-            datasets_list.append(
-                CatalogItem(
-                    uri=dataset_uri,
-                    title=dataset_data["title"],
-                    description=dataset_data["description"],
-                    numRecords=dataset_data["numRecords"],
-                    publisher=dataset_data["publisher"],
-                    issued=dataset_data["issued"],
-                    identifier=dataset_data["identifier"],
-                    creators=sorted(list(dataset_data["creators"])),
-                ).dict()
-            )
-        result_catalogs.append(
-            Catalog(
-                metadata=CatalogMetadata(**data["metadata"]),
-                datasets=datasets_list
+        # Append dataset info for the current catalog
+        catalogs_data[catalog_uri]["datasets"].append(
+            CatalogItem(
+                uri=str(row.dataset),
+                title=str(row.datasetTitle) if row.datasetTitle else "Untitled Dataset",
+                description=str(row.datasetDescription) if row.datasetDescription else "",
+                numRecords=int(row.numRecords),
+                identifier=str(row.datasetIdentifier) if row.datasetIdentifier else "N/A",
+                publisher=str(row.catalogPublisher) if row.catalogPublisher else "N/A",
+                # **MODIFICATION**: Pass the newly queried ?datasetIssued value.
+                issued=str(row.datasetIssued) if row.datasetIssued else None,
+                creators=[]
             ).dict()
         )
     
-    return {"catalogs": result_catalogs}
+    # Format the final output
+    final_catalogs = []
+    for uri, data in catalogs_data.items():
+        meta_dict = data["metadata"].dict()
+        meta_dict["uri"] = uri
+        
+        final_catalogs.append({
+            "metadata": meta_dict,
+            "datasets": data["datasets"]
+        })
+        
+    return {"catalogs": final_catalogs}
 
 @app.get("/api/visualize")
 async def get_graph_data_for_visualization_api():
