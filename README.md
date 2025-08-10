@@ -20,14 +20,14 @@ Built with **Python**, the app uses:
 
 | Feature | Description |
 |--------|-------------|
-| 🏥 **DICOM Processing** | Generates 50 mock DICOM files on startup |
-| 📑 **Metadata Extraction** | Extracts Patient ID, Study Date, Modality, Accession Number |
+| 🏥 **DICOM Processing** | Extracting Metadata from DICOM files picked from TCIA |
+| 📑 **Metadata Extraction** | Extracts Patient ID, Study Date, Modality, Accession Number etc |
 | 📚 **Semantic Mapping** | Maps values to ROO, SNOMED CT, and FOAF ontologies |
 | 🔗 **RDF Generation** | Builds triples and populates an in-memory knowledge graph |
 | 🔍 **SPARQL Endpoint** | Supports SPARQL 1.1 queries via a web form |
 | 📂 **Metadata Catalog** | Web interface styled after FAIR Data Platforms (Health DCAT-AP) |
 | 🕸️ **Knowledge Graph Visualization** | In-browser graph using force-directed layout |
-| ⬆️ **DICOM Upload** | Upload your own DICOMs and enrich the graph dynamically |
+
 
 ---
 
@@ -93,12 +93,6 @@ INFO:     Application startup complete.
 - Metadata like `PatientID`, `StudyDate`, and `Modality` are extracted
 - Mapped to SNOMED CT and ROO terms
 - RDF triples are generated and stored in an in-memory `rdflib.Graph`
-
-### On File Upload
-
-- Uploaded DICOMs are saved to `dicom_uploads/`
-- Metadata is extracted and converted into RDF
-- The knowledge graph is updated live
 
 ## 🧪 SPARQL Query Example
 
