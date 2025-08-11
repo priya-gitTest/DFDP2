@@ -340,27 +340,45 @@ async def get_graph_data_for_visualization_api():
         if dataset_node_id not in nodes:
             nodes[dataset_node_id] = {"id": dataset_node_id, "label": details["datasetTitle"], "group": 2, "title": f"Dataset: {details['datasetTitle']}"}
         
+        # Patient node
         if patient_node_id not in nodes:
-            patient_title = (
-                f"Patient ID: {patient_id}\n"
+            patient_label = (
+                f"Patient: {patient_id}\n"
                 f"Gender: {details['gender']}\n"
                 f"Age: {details['age']}\n"
                 f"History: {details['patientHistory']}"
             )
-            nodes[patient_node_id] = {"id": patient_node_id, "label": f"Patient: {patient_id}", "group": 3, "title": patient_title}
+            nodes[patient_node_id] = {
+                "id": patient_node_id,
+                "label": patient_label,
+                "group": 3
+            }
 
+        # Study node
         if study_node_id not in nodes:
-            study_title = (
+            study_label = (
                 f"Study UID: {study_uid}\n"
                 f"Modality: {details['modality']}\n"
                 f"Body Part: {details['bodyPartExamined']}\n"
                 f"Anatomic Site: {details['anatomicSite']}"
             )
-            nodes[study_node_id] = {"id": study_node_id, "label": f"Study: {study_uid[:15]}...", "group": 4, "title": study_title}
-        
+            nodes[study_node_id] = {
+                "id": study_node_id,
+                "label": study_label,
+                "group": 4
+            }
+
+        # Series node
         if series_node_id not in nodes:
-            series_title = f"Series UID: {series_uid}\nDescription: {details['seriesDescription']}"
-            nodes[series_node_id] = {"id": series_node_id, "label": f"Series: {details['seriesDescription']}", "group": 5, "title": series_title}
+            series_label = (
+                f"Series UID: {series_uid}\n"
+                f"Description: {details['seriesDescription']}"
+            )
+            nodes[series_node_id] = {
+                "id": series_node_id,
+                "label": series_label,
+                "group": 5
+            }
 
         # Add links between the nodes
         links.extend([
