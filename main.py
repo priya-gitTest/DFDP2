@@ -248,47 +248,129 @@ async def get_catalog_datasets_api():
 @app.get("/api/visualize")
 async def get_graph_data_for_visualization_api():
     """
-    Extracts a structured graph of catalogs and datasets for visualization.
-    This creates a cleaner graph by focusing on the main entities.
+    Extracts a structured graph of catalogs, datasets, patients, studies, 
+    and series for visualization.
     """
-    # This query finds catalogs and the datasets linked to them.
     query = """
     PREFIX dcat: <http://www.w3.org/ns/dcat#>
     PREFIX dcterms: <http://purl.org/dc/terms/>
+    PREFIX dicom: <http://dicom.nema.org/resources/ontology/DCM#>
+    PREFIX roo: <http://www.cancerdata.org/roo/>
 
-    SELECT ?catalog_uri ?catalog_title ?dataset_uri ?dataset_title
+    SELECT DISTINCT
+      ?catalogURI ?catalogTitle
+      ?datasetURI ?datasetTitle
+      ?patientID ?gender ?age ?patientHistory
+      ?studyUID ?modality ?bodyPartExamined ?anatomicSite
+      ?seriesUID ?seriesDescription
     WHERE {
-      ?catalog_uri a dcat:Catalog ;
-                   dcterms:title ?catalog_title ;
-                   dcat:dataset ?dataset_uri .
-      ?dataset_uri dcterms:title ?dataset_title .
+      ?catalogURI a dcat:Catalog ;
+                  dcterms:title ?catalogTitle ;
+                  dcat:dataset ?datasetURI .
+      ?datasetURI a dcat:Dataset ;
+                  dcterms:title ?datasetTitle ;
+                  dcat:distribution ?distribution .
+      ?distribution dicom:PatientID ?patientID ;
+                    dicom:StudyInstanceUID ?studyUID ;
+                    dicom:SeriesInstanceUID ?seriesUID .
+      
+      OPTIONAL { ?distribution roo:hasSex ?gender . }
+      OPTIONAL { ?distribution roo:hasAge ?age . }
+      OPTIONAL { ?distribution roo:hasPatientHistory ?patientHistory . }
+      OPTIONAL { ?distribution dicom:Modality ?modality . }
+      OPTIONAL { ?distribution dicom:BodyPartExamined ?bodyPartExamined . }
+      OPTIONAL { ?distribution roo:hasAnatomicSite ?anatomicSite . }
+      OPTIONAL { ?distribution dicom:SeriesDescription ?seriesDescription . }
     }
+    ORDER BY ?catalogTitle ?datasetTitle ?patientID ?studyUID
     """
     
     try:
-        qres = g.query(query)
+        # Convert results to a list to allow multiple iterations
+        results = list(g.query(query))
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"SPARQL query for visualization failed: {e}")
+        raise HTTPException(status_code=500, detail=f"Error executing SPARQL query: {e}")
 
     nodes = {}
     links = []
+    
+    # Use a dictionary to store all data, keyed by a tuple of identifiers
+    # This ensures that each unique entity is processed only once
+    graph_data = {}
 
-    # Helper to add nodes without duplicates
-    def add_node(uri, label, group):
-        if uri not in nodes:
-            nodes[uri] = {"id": uri, "label": label, "group": group}
-
-    for row in qres:
-        cat_uri, cat_title, ds_uri, ds_title = str(row.catalog_uri), str(row.catalog_title), str(row.dataset_uri), str(row.dataset_title)
+    for row in results:
+        # Create a unique key for each row to avoid duplicates
+        key = (
+            str(row.catalogURI),
+            str(row.datasetURI),
+            str(row.patientID),
+            str(row.studyUID),
+            str(row.seriesUID)
+        )
         
-        # Add nodes for the catalog and the dataset
-        add_node(cat_uri, cat_title, 1)  # Group 1 for Catalogs
-        add_node(ds_uri, ds_title, 2)   # Group 2 for Datasets
+        # If we haven't processed this combination, store its details
+        if key not in graph_data:
+            graph_data[key] = {
+                "catalogTitle": str(row.catalogTitle),
+                "datasetTitle": str(row.datasetTitle),
+                "gender": str(row.gender) if row.gender else "N/A",
+                "age": str(row.age) if row.age else "N/A",
+                "patientHistory": str(row.patientHistory) if row.patientHistory else "N/A",
+                "modality": str(row.modality) if row.modality else "N/A",
+                "bodyPartExamined": str(row.bodyPartExamined) if row.bodyPartExamined else "N/A",
+                "anatomicSite": str(row.anatomicSite) if row.anatomicSite else "N/A",
+                "seriesDescription": str(row.seriesDescription) if row.seriesDescription else "N/A"
+            }
+
+    # Now, build the nodes and links from the aggregated data
+    for key, details in graph_data.items():
+        catalog_uri, dataset_uri, patient_id, study_uid, series_uid = key
+
+        # Define unique node IDs
+        catalog_node_id = catalog_uri
+        dataset_node_id = dataset_uri
+        patient_node_id = f"patient_{patient_id}"
+        study_node_id = study_uid
+        series_node_id = series_uid
+
+        # Add nodes if they don't already exist
+        if catalog_node_id not in nodes:
+            nodes[catalog_node_id] = {"id": catalog_node_id, "label": details["catalogTitle"], "group": 1, "title": f"Catalog: {details['catalogTitle']}"}
         
-        # Create a link from the catalog to the dataset
-        links.append({"source": cat_uri, "target": ds_uri})
+        if dataset_node_id not in nodes:
+            nodes[dataset_node_id] = {"id": dataset_node_id, "label": details["datasetTitle"], "group": 2, "title": f"Dataset: {details['datasetTitle']}"}
+        
+        if patient_node_id not in nodes:
+            patient_title = (
+                f"Patient ID: {patient_id}\n"
+                f"Gender: {details['gender']}\n"
+                f"Age: {details['age']}\n"
+                f"History: {details['patientHistory']}"
+            )
+            nodes[patient_node_id] = {"id": patient_node_id, "label": f"Patient: {patient_id}", "group": 3, "title": patient_title}
 
-    if not nodes:
-        return {"nodes": [], "links": []}
+        if study_node_id not in nodes:
+            study_title = (
+                f"Study UID: {study_uid}\n"
+                f"Modality: {details['modality']}\n"
+                f"Body Part: {details['bodyPartExamined']}\n"
+                f"Anatomic Site: {details['anatomicSite']}"
+            )
+            nodes[study_node_id] = {"id": study_node_id, "label": f"Study: {study_uid[:15]}...", "group": 4, "title": study_title}
+        
+        if series_node_id not in nodes:
+            series_title = f"Series UID: {series_uid}\nDescription: {details['seriesDescription']}"
+            nodes[series_node_id] = {"id": series_node_id, "label": f"Series: {details['seriesDescription']}", "group": 5, "title": series_title}
 
-    return {"nodes": list(nodes.values()), "links": links}
+        # Add links between the nodes
+        links.extend([
+            {"source": catalog_node_id, "target": dataset_node_id},
+            {"source": dataset_node_id, "target": patient_node_id},
+            {"source": patient_node_id, "target": study_node_id},
+            {"source": study_node_id, "target": series_node_id}
+        ])
+
+    # Remove duplicate links
+    unique_links = [dict(t) for t in {tuple(d.items()) for d in links}]
+
+    return {"nodes": list(nodes.values()), "links": unique_links}
