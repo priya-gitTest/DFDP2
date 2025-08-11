@@ -256,31 +256,57 @@ async def get_graph_data_for_visualization_api():
     PREFIX dcterms: <http://purl.org/dc/terms/>
     PREFIX dicom: <http://dicom.nema.org/resources/ontology/DCM#>
     PREFIX roo: <http://www.cancerdata.org/roo/>
+    PREFIX rdfs: <http://www.w3.org/2000/01/rdf-schema#>
 
     SELECT DISTINCT
-      ?catalogURI ?catalogTitle
-      ?datasetURI ?datasetTitle
-      ?patientID ?gender ?age ?patientHistory
-      ?studyUID ?modality ?bodyPartExamined ?anatomicSite
-      ?seriesUID ?seriesDescription
+    ?catalogURI ?catalogTitle
+    ?datasetURI ?datasetTitle
+    ?patientID
+    ?genderURI ?genderLabel
+    ?age
+    ?patientHistory
+    ?studyUID
+    ?modalityURI ?modalityLabel
+    ?bodyPartURI ?bodyPartLabel
+    ?anatomicSite
+    ?seriesUID ?seriesDescription
     WHERE {
-      ?catalogURI a dcat:Catalog ;
-                  dcterms:title ?catalogTitle ;
-                  dcat:dataset ?datasetURI .
-      ?datasetURI a dcat:Dataset ;
-                  dcterms:title ?datasetTitle ;
-                  dcat:distribution ?distribution .
-      ?distribution dicom:PatientID ?patientID ;
+    ?catalogURI a dcat:Catalog ;
+                dcterms:title ?catalogTitle ;
+                dcat:dataset ?datasetURI .
+    ?datasetURI a dcat:Dataset ;
+                dcterms:title ?datasetTitle ;
+                dcat:distribution ?distribution .
+    ?distribution dicom:PatientID ?patientID ;
                     dicom:StudyInstanceUID ?studyUID ;
                     dicom:SeriesInstanceUID ?seriesUID .
-      
-      OPTIONAL { ?distribution roo:hasSex ?gender . }
-      OPTIONAL { ?distribution roo:hasAge ?age . }
-      OPTIONAL { ?distribution roo:hasPatientHistory ?patientHistory . }
-      OPTIONAL { ?distribution dicom:Modality ?modality . }
-      OPTIONAL { ?distribution dicom:BodyPartExamined ?bodyPartExamined . }
-      OPTIONAL { ?distribution roo:hasAnatomicSite ?anatomicSite . }
-      OPTIONAL { ?distribution dicom:SeriesDescription ?seriesDescription . }
+
+    # Gender as URI + optional label
+    OPTIONAL {
+        ?distribution roo:hasSex ?genderURI .
+        OPTIONAL { ?genderURI rdfs:label ?genderLabel }
+    }
+
+    # Age stays as literal for now
+    OPTIONAL { ?distribution roo:hasAge ?age . }
+
+    # Patient history stays as literal
+    OPTIONAL { ?distribution roo:hasPatientHistory ?patientHistory . }
+
+    # Modality as URI + optional label
+    OPTIONAL {
+        ?distribution dicom:Modality ?modalityURI .
+        OPTIONAL { ?modalityURI rdfs:label ?modalityLabel }
+    }
+
+    # Body part examined as URI + optional label
+    OPTIONAL {
+        ?distribution dicom:BodyPartExamined ?bodyPartURI .
+        OPTIONAL { ?bodyPartURI rdfs:label ?bodyPartLabel }
+    }
+
+    OPTIONAL { ?distribution roo:hasAnatomicSite ?anatomicSite . }
+    OPTIONAL { ?distribution dicom:SeriesDescription ?seriesDescription . }
     }
     ORDER BY ?catalogTitle ?datasetTitle ?patientID ?studyUID
     """
@@ -313,11 +339,14 @@ async def get_graph_data_for_visualization_api():
             graph_data[key] = {
                 "catalogTitle": str(row.catalogTitle),
                 "datasetTitle": str(row.datasetTitle),
-                "gender": str(row.gender) if row.gender else "N/A",
+                "genderURI": str(row.genderURI) if hasattr(row, "genderURI") and row.genderURI else None,
+                "genderLabel": str(row.genderLabel) if hasattr(row, "genderLabel") and row.genderLabel else None,
                 "age": str(row.age) if row.age else "N/A",
                 "patientHistory": str(row.patientHistory) if row.patientHistory else "N/A",
-                "modality": str(row.modality) if row.modality else "N/A",
-                "bodyPartExamined": str(row.bodyPartExamined) if row.bodyPartExamined else "N/A",
+                "modalityURI": str(row.modalityURI) if hasattr(row, "modalityURI") and row.modalityURI else None,
+                "modalityLabel": str(row.modalityLabel) if hasattr(row, "modalityLabel") and row.modalityLabel else None,
+                "bodyPartURI": str(row.bodyPartURI) if hasattr(row, "bodyPartURI") and row.bodyPartURI else None,
+                "bodyPartLabel": str(row.bodyPartLabel) if hasattr(row, "bodyPartLabel") and row.bodyPartLabel else None,
                 "anatomicSite": str(row.anatomicSite) if row.anatomicSite else "N/A",
                 "seriesDescription": str(row.seriesDescription) if row.seriesDescription else "N/A"
             }
@@ -342,9 +371,10 @@ async def get_graph_data_for_visualization_api():
         
         # Patient node
         if patient_node_id not in nodes:
+            gender_display = details["genderLabel"] or details["genderURI"] or "N/A"
             patient_label = (
                 f"Patient: {patient_id}\n"
-                f"Gender: {details['gender']}\n"
+                f"Gender: {gender_display}\n"
                 f"Age: {details['age']}\n"
                 f"History: {details['patientHistory']}"
             )
@@ -358,8 +388,8 @@ async def get_graph_data_for_visualization_api():
         if study_node_id not in nodes:
             study_label = (
                 f"Study UID: {study_uid}\n"
-                f"Modality: {details['modality']}\n"
-                f"Body Part: {details['bodyPartExamined']}\n"
+                f"Modality: {details['modalityURI']}\n"
+                f"Body Part: {details['bodyPartURI']}\n"
                 f"Anatomic Site: {details['anatomicSite']}"
             )
             nodes[study_node_id] = {
@@ -379,6 +409,37 @@ async def get_graph_data_for_visualization_api():
                 "label": series_label,
                 "group": 5
             }
+        # Gender node
+        if details.get("genderURI"):
+            gender_node_id = details["genderURI"]
+            if gender_node_id not in nodes:
+                nodes[gender_node_id] = {
+                    "id": gender_node_id,
+                    "label": f"Gender: {details['genderLabel'] or details['genderURI']}",
+                    "group": 6
+                }
+            links.append({"source": patient_node_id, "target": gender_node_id})
+
+        # Modality node
+        if details.get("modalityURI"):
+            modality_node_id = details["modalityURI"]
+            if modality_node_id not in nodes:
+                nodes[modality_node_id] = {
+                    "id": modality_node_id,
+                    "label": f"Modality: {details['modalityLabel'] or details['modalityURI']}",
+                    "group": 7
+                }
+            links.append({"source": study_node_id, "target": modality_node_id})
+
+        # Body Part Examined node
+        if details.get("bodyPartURI"):
+            body_part_node_id = details["bodyPartURI"]
+            if body_part_node_id not in nodes:
+                nodes[body_part_node_id] = {
+                    "id": body_part_node_id,
+                    "label": f"Body Part: {details['bodyPartLabel'] or details['bodyPartURI']}",
+                    "group": 8
+                }
 
         # Add links between the nodes
         links.extend([
@@ -387,6 +448,7 @@ async def get_graph_data_for_visualization_api():
             {"source": patient_node_id, "target": study_node_id},
             {"source": study_node_id, "target": series_node_id}
         ])
+        links.append({"source": study_node_id, "target": body_part_node_id})
 
     # Remove duplicate links
     unique_links = [dict(t) for t in {tuple(d.items()) for d in links}]
