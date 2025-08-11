@@ -1,131 +1,124 @@
-{% extends "base.html" %}
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Knowledge Graph Visualization</title>
+    <script src="https://d3js.org/d3.v7.min.js"></script>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        body { margin: 0; font-family: sans-serif; }
+        .links line { stroke: #999; stroke-opacity: 0.6; }
+        .nodes circle { stroke: #fff; stroke-width: 1.5px; }
+        .node-label { font-size: 10px; fill: #333; pointer-events: none; }
+    </style>
+</head>
+<body class="bg-gray-100">
+    <header class="bg-indigo-800 text-white p-4 shadow-md">
+        <div class="container mx-auto flex justify-between items-center">
+            <h1 class="text-xl font-bold">DICOM KG</h1>
+            <nav>
+                <a href="/" class="px-3 py-2 rounded-md text-sm font-medium hover:bg-indigo-700">Home</a>
+                <a href="/catalog" class="px-3 py-2 rounded-md text-sm font-medium hover:bg-indigo-700">Catalog</a>
+                <a href="/sparql" class="px-3 py-2 rounded-md text-sm font-medium hover:bg-indigo-700">SPARQL</a>
+                <a href="/visualize" class="px-3 py-2 rounded-md text-sm font-medium hover:bg-indigo-700">Visualize</a>
+            </nav>
+        </div>
+    </header>
 
-{% block content %}
-<div class="flex flex-col items-center justify-center text-center">
-    <h1 class="text-4xl font-bold text-gray-900 mb-6">Interactive Graph Visualization</h1>
-    <p class="text-lg text-gray-600 max-w-2xl mb-8">
-        Explore the relationships between datasets and their properties in a dynamic force-directed graph.
-    </p>
-    <div class="bg-white rounded-lg shadow-lg p-4 w-full h-[800px] flex items-center justify-center relative">
-        <p id="loading-graph" class="text-gray-500 text-center">Loading graph data...</p>
-        <svg id="graph-container" class="w-full h-full"></svg>
-    </div>
-</div>
+    <main class="pt-20">
+        <div id="graph-container" class="w-full" style="height: calc(100vh - 64px);">
+            </div>
+    </main>
+    
+    <script>
+        const container = document.getElementById("graph-container");
+        const width = container.clientWidth;
+        const height = container.clientHeight;
 
-<!-- D3.js library -->
-<script src="https://d3js.org/d3.v7.min.js"></script>
-<script>
-    document.addEventListener('DOMContentLoaded', () => {
-        const loadingMessage = document.getElementById('loading-graph');
-        const svg = d3.select("#graph-container");
-        const container = svg.node().parentNode;
-        let width = container.clientWidth;
-        let height = container.clientHeight;
+        const svg = d3.select("#graph-container").append("svg")
+            .attr("width", width)
+            .attr("height", height)
+            .call(d3.zoom().on("zoom", (event) => {
+                g.attr("transform", event.transform)
+            }));
 
-        // Function to render the graph
-        async function renderGraph() {
-            width = container.clientWidth;
-            height = container.clientHeight;
+        const g = svg.append("g");
 
-            svg.html(''); // Clear previous graph
-            svg.attr("width", width)
-               .attr("height", height)
-               .attr("viewBox", `0 0 ${width} ${height}`)
-               .attr("preserveAspectRatio", "xMidYMid meet");
+        const color = d3.scaleOrdinal(d3.schemeCategory10);
+
+        const simulation = d3.forceSimulation()
+            .force("link", d3.forceLink().id(d => d.id).distance(150))
+            .force("charge", d3.forceManyBody().strength(-300))
+            .force("center", d3.forceCenter(width / 2, height / 2));
+
+        // **FIX**: Changed the endpoint from "/graph-data" to the correct "/api/visualize"
+        d3.json("/api/visualize").then(function(graph) {
             
-            try {
-                // Fixed the fetch URL to use an absolute path
-                const response = await fetch(`${window.location.origin}/api/visualize`);
-                if (!response.ok) {
-                    throw new Error('Failed to fetch graph data');
-                }
-                const graphData = await response.json();
-                
-                loadingMessage.classList.add('hidden');
+            const link = g.append("g")
+                .attr("class", "links")
+                .selectAll("line")
+                .data(graph.links)
+                .join("line")
+                .attr("stroke-width", 1.5);
 
-                const simulation = d3.forceSimulation(graphData.nodes)
-                    .force("link", d3.forceLink(graphData.links).id(d => d.id).distance(150))
-                    .force("charge", d3.forceManyBody().strength(-800)) // Increased repulsion force significantly
-                    // Removed .force("center", d3.forceCenter(width / 2, height / 2)) to allow nodes to spread out
-                    ;
+            const node = g.append("g")
+                .attr("class", "nodes")
+                .selectAll("g") // Create groups for nodes
+                .data(graph.nodes)
+                .join("g")
+                .call(d3.drag()
+                    .on("start", dragstarted)
+                    .on("drag", dragged)
+                    .on("end", dragended));
+            
+            node.append("circle")
+                .attr("r", 12)
+                .attr("fill", d => color(d.group));
+            
+            node.append("text")
+                .attr("class", "node-label")
+                .attr("dx", 15)
+                .attr("dy", ".35em")
+                .text(d => d.label);
 
-                const link = svg.append("g")
-                    .attr("stroke", "#999")
-                    .attr("stroke-opacity", 0.6)
-                    .selectAll("line")
-                    .data(graphData.links)
-                    .join("line");
+            node.append("title")
+                .text(d => d.id);
 
-                const node = svg.append("g")
-                    .attr("stroke", "#fff")
-                    .attr("stroke-width", 1.5)
-                    .selectAll("circle")
-                    .data(graphData.nodes)
-                    .join("circle")
-                    .attr("r", 10)
-                    .attr("fill", d => d.group === 1 ? "#6b46c1" : "#d53f8c")
-                    .call(d3.drag()
-                        .on("start", dragstarted)
-                        .on("drag", dragged)
-                        .on("end", dragended));
+            simulation
+                .nodes(graph.nodes)
+                .on("tick", ticked);
 
-                const labels = svg.append("g")
-                    .attr("class", "labels")
-                    .selectAll("text")
-                    .data(graphData.nodes)
-                    .enter().append("text")
-                    .text(d => d.id)
-                    .attr("font-size", "12px")
-                    .attr("pointer-events", "none")
-                    .attr("text-anchor", "middle");
+            simulation.force("link")
+                .links(graph.links);
 
-                simulation.on("tick", () => {
-                    link
-                        .attr("x1", d => d.source.x)
-                        .attr("y1", d => d.source.y)
-                        .attr("x2", d => d.target.x)
-                        .attr("y2", d => d.target.y);
-
-                    node
-                        .attr("cx", d => d.x)
-                        .attr("cy", d => d.y);
-                    
-                    labels
-                        .attr("x", d => d.x)
-                        .attr("y", d => d.y - 15);
-                });
-
-                function dragstarted(event, d) {
-                    if (!event.active) simulation.alphaTarget(0.3).restart();
-                    d.fx = d.x;
-                    d.fy = d.y;
-                }
-
-                function dragged(event, d) {
-                    d.fx = event.x;
-                    d.fy = event.y;
-                }
-
-                function dragended(event, d) {
-                    if (!event.active) simulation.alphaTarget(0);
-                    d.fx = null;
-                    d.fy = null;
-                }
-
-            } catch (error) {
-                console.error('Error fetching graph data:', error);
-                loadingMessage.textContent = 'Failed to load graph data. Please check the API.';
-                loadingMessage.classList.remove('hidden');
+            function ticked() {
+                link
+                    .attr("x1", d => d.source.x)
+                    .attr("y1", d => d.source.y)
+                    .attr("x2", d => d.target.x)
+                    .attr("y2", d => d.target.y);
+                node
+                    .attr("transform", d => `translate(${d.x},${d.y})`);
             }
-        }
-        
-        // Initial render
-        renderGraph();
-
-        // Handle window resizing
-        window.addEventListener('resize', () => {
-            renderGraph();
         });
-    });
-</script>
-{% endblock %}
+
+        function dragstarted(event, d) {
+            if (!event.active) simulation.alphaTarget(0.3).restart();
+            d.fx = d.x;
+            d.fy = d.y;
+        }
+
+        function dragged(event, d) {
+            d.fx = event.x;
+            d.fy = event.y;
+        }
+
+        function dragended(event, d) {
+            if (!event.active) simulation.alphaTarget(0);
+            d.fx = null;
+            d.fy = null;
+        }
+    </script>
+</body>
+</html>

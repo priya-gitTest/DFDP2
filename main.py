@@ -241,23 +241,54 @@ async def get_catalog_datasets_api():
         
     return {"catalogs": final_catalogs}
 
+# In main.py, replace the /api/visualize endpoint function
+
+# In main.py, find and replace the entire @app.get("/api/visualize") function
+
 @app.get("/api/visualize")
 async def get_graph_data_for_visualization_api():
     """
-    Extracts nodes and links from the graph for D3.js visualization.
-    This is a simplified approach to demonstrate the concept.
+    Extracts a structured graph of catalogs and datasets for visualization.
+    This creates a cleaner graph by focusing on the main entities.
     """
+    # This query finds catalogs and the datasets linked to them.
+    query = """
+    PREFIX dcat: <http://www.w3.org/ns/dcat#>
+    PREFIX dcterms: <http://purl.org/dc/terms/>
+
+    SELECT ?catalog_uri ?catalog_title ?dataset_uri ?dataset_title
+    WHERE {
+      ?catalog_uri a dcat:Catalog ;
+                   dcterms:title ?catalog_title ;
+                   dcat:dataset ?dataset_uri .
+      ?dataset_uri dcterms:title ?dataset_title .
+    }
+    """
+    
+    try:
+        qres = g.query(query)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"SPARQL query for visualization failed: {e}")
+
     nodes = {}
     links = []
 
-    for s, p, o in g:
-        # Add subject and object as nodes
-        if s not in nodes:
-            nodes[s] = {"id": str(s), "group": 1}
-        if o not in nodes:
-            nodes[o] = {"id": str(o), "group": 2}
+    # Helper to add nodes without duplicates
+    def add_node(uri, label, group):
+        if uri not in nodes:
+            nodes[uri] = {"id": uri, "label": label, "group": group}
 
-        # Add the triple as a link
-        links.append({"source": str(s), "target": str(o), "label": str(p)})
+    for row in qres:
+        cat_uri, cat_title, ds_uri, ds_title = str(row.catalog_uri), str(row.catalog_title), str(row.dataset_uri), str(row.dataset_title)
+        
+        # Add nodes for the catalog and the dataset
+        add_node(cat_uri, cat_title, 1)  # Group 1 for Catalogs
+        add_node(ds_uri, ds_title, 2)   # Group 2 for Datasets
+        
+        # Create a link from the catalog to the dataset
+        links.append({"source": cat_uri, "target": ds_uri})
+
+    if not nodes:
+        return {"nodes": [], "links": []}
 
     return {"nodes": list(nodes.values()), "links": links}
