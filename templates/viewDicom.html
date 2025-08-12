@@ -1,0 +1,184 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>DICOM Viewer</title>
+    <style>
+        /* Basic styling for layout and appearance */
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+            margin: 0;
+            padding: 0;
+            background-color: #f4f7f9;
+            display: flex;
+            flex-direction: column;
+            height: 100vh;
+        }
+        header {
+            background-color: #ffffff;
+            padding: 1rem 2rem;
+            border-bottom: 1px solid #e0e0e0;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.05);
+            text-align: center;
+        }
+        h1 {
+            margin: 0;
+            color: #333;
+        }
+        main {
+            display: flex;
+            flex: 1;
+            overflow: hidden; /* Prevent scrolling on the main container */
+        }
+        #file-list-container {
+            width: 300px;
+            background-color: #fff;
+            border-right: 1px solid #e0e0e0;
+            padding: 1rem;
+            overflow-y: auto; /* Make the list scrollable */
+        }
+        #file-list-container h2 {
+            margin-top: 0;
+            color: #555;
+            border-bottom: 2px solid #eee;
+            padding-bottom: 0.5rem;
+        }
+        #file-list {
+            list-style-type: none;
+            padding: 0;
+            margin: 0;
+        }
+        #file-list li {
+            padding: 0.75rem 0.5rem;
+            cursor: pointer;
+            border-radius: 6px;
+            transition: background-color 0.2s ease;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+        #file-list li:hover {
+            background-color: #e9f5ff;
+        }
+        #file-list li.selected {
+            background-color: #007bff;
+            color: white;
+            font-weight: bold;
+        }
+        #image-viewer {
+            flex: 1;
+            padding: 2rem;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            background-color: #e9ecef;
+            overflow: auto;
+        }
+        #image-container {
+            background-color: #fff;
+            padding: 1rem;
+            border-radius: 8px;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.1);
+            max-width: 90%;
+            max-height: 90%;
+        }
+        #dicom-image {
+            max-width: 100%;
+            max-height: 100%;
+            display: block;
+        }
+        #status-message {
+            color: #666;
+            font-size: 1.2rem;
+        }
+    </style>
+</head>
+<body>
+
+    <header>
+        <h1>DICOM File Viewer</h1>
+    </header>
+
+    <main>
+        <aside id="file-list-container">
+            <h2>Available Files</h2>
+            <ul id="file-list">
+                <!-- File list will be populated by JavaScript -->
+            </ul>
+        </aside>
+
+        <section id="image-viewer">
+            <div id="image-container">
+                <p id="status-message">Select a file from the list to display it here.</p>
+                <img id="dicom-image" src="" alt="DICOM Image" style="display: none;">
+            </div>
+        </section>
+    </main>
+
+    <script>
+        // JavaScript to fetch file list and display images
+        document.addEventListener('DOMContentLoaded', () => {
+            const fileList = document.getElementById('file-list');
+            const dicomImage = document.getElementById('dicom-image');
+            const statusMessage = document.getElementById('status-message');
+            const imageContainer = document.getElementById('image-container');
+
+            // Fetch the list of files from the FastAPI backend
+            fetch('http://127.0.0.1:8000/files')
+                .then(response => response.json())
+                .then(data => {
+                    if (data.files && data.files.length > 0) {
+                        data.files.forEach(filename => {
+                            const li = document.createElement('li');
+                            li.textContent = filename;
+                            li.title = filename; // Show full name on hover
+                            li.dataset.filename = filename; // Store filename in data attribute
+                            fileList.appendChild(li);
+                        });
+                    } else {
+                        fileList.innerHTML = '<li>No DICOM files found.</li>';
+                    }
+                })
+                .catch(error => {
+                    console.error('Error fetching file list:', error);
+                    fileList.innerHTML = '<li>Error loading file list.</li>';
+                });
+
+            // Add a single event listener to the parent list for efficiency
+            fileList.addEventListener('click', (event) => {
+                if (event.target && event.target.nodeName === 'LI') {
+                    const filename = event.target.dataset.filename;
+                    if (filename) {
+                        // Update UI to show loading state
+                        statusMessage.textContent = `Loading ${filename}...`;
+                        statusMessage.style.display = 'block';
+                        dicomImage.style.display = 'none';
+
+                        // Set the image source to the FastAPI endpoint
+                        dicomImage.src = `http://127.0.0.1:8000/dicom/${filename}`;
+
+                        // Handle image loading success
+                        dicomImage.onload = () => {
+                            statusMessage.style.display = 'none';
+                            dicomImage.style.display = 'block';
+                        };
+
+                        // Handle image loading error
+                        dicomImage.onerror = () => {
+                            statusMessage.textContent = `Error loading image: ${filename}`;
+                            dicomImage.style.display = 'none';
+                        };
+                        
+                        // Highlight the selected item
+                        const allItems = fileList.querySelectorAll('li');
+                        allItems.forEach(item => item.classList.remove('selected'));
+                        event.target.classList.add('selected');
+                    }
+                }
+            });
+        });
+    </script>
+</body>
+</html>
